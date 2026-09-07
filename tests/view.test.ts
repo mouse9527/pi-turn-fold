@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { stripVTControlCharacters } from 'node:util';
 import { createEditToolDefinition, initTheme } from '@earendil-works/pi-coding-agent';
-import { Text, visibleWidth, type TUI, type TuiMouseEvent } from '@earendil-works/pi-tui';
+import { Text, visibleWidth, type Component, type TUI, type TuiMouseEvent } from '@earendil-works/pi-tui';
 import { Turn } from '../src/turns.ts';
 import { TurnView, type ViewHost } from '../src/view.ts';
 
@@ -31,12 +31,12 @@ test('closed turns build zero native tool renderers; mouse expands exactly the c
   assert.equal(calls, 0);
   assert.equal(view.rows.size, 0);
   assert.doesNotMatch(lines.join('\n'), /hidden output|python3/);
-  const summaryY = lines.findIndex(line => line.includes('1000 tools'));
+  const summaryY = lines.findIndex(line => line.includes('执行 1000'));
   assert.ok(view.handleMouse(click(summaryY, lines.length))?.handled);
   lines = view.render(80);
   assert.equal(calls, 0);
   assert.equal(view.rows.size, 1000);
-  const toolY = lines.findIndex(line => line.includes('bash python3'));
+  const toolY = lines.findIndex(line => line.includes('✓ 执行 python3'));
   assert.ok(view.handleMouse(click(toolY, lines.length))?.handled);
   lines = view.render(80);
   assert.equal(calls, 1);
@@ -48,6 +48,89 @@ test('closed turns build zero native tool renderers; mouse expands exactly the c
   for (let i = 0; i < 50; i++) { view.toggle(); view.render(80); view.toggle(); view.render(80); }
   assert.equal(view.rows.size, 0);
   assert.equal(calls, 1);
+});
+
+test('inline dispatch reaches saved edit and nested native details without losing open state or executing tools', () => {
+  let executions = 0;
+  let nested: (Component & { open: boolean; saved: string }) | undefined;
+  const editDefinition = createEditToolDefinition(process.cwd());
+  const turn = new Turn();
+  turn.running = true;
+  const edit = turn.tool('edit', 'edit', { path: '/not-on-disk/auth.ts', edits: [{ oldText: 'before', newText: 'after' }] });
+  turn.result(edit, { content: [{ type: 'text', text: 'saved edit result' }], isError: false,
+    details: { diff: '-1 before\n+1 after', firstChangedLine: 1 } });
+  const custom = turn.tool('nested', 'custom-agent', { query: 'saved parent input' });
+  turn.startTool(custom, custom.args);
+  turn.result(custom, { content: [{ type: 'text', text: 'saved nested output' }], isError: false }, true);
+  const view = new TurnView(turn, { ...host, toolDefinition: name => name === 'edit' ? editDefinition : {
+    name: 'custom-agent', label: 'Custom', description: 'Synthetic saved nested renderer', parameters: {} as any,
+    execute: async () => { executions++; return { content: [] }; },
+    renderCall: () => new Text('registered parent renderer', 0, 0),
+    renderResult: (...[result, _options, _theme, context]: Parameters<NonNullable<typeof editDefinition.renderResult>>) => {
+      const child = context.lastComponent as typeof nested ?? {
+        open: false, saved: '',
+        render() { return [`${this.open ? '▾' : '▸'} saved child invocation`,
+          ...(this.open ? ['saved child parameter: value', this.saved] : [])]; },
+        invalidate() {},
+        handleMouse(event: TuiMouseEvent) {
+          if (event.y !== 0 || event.type !== 'click' || event.button !== 'left') return;
+          this.open = !this.open;
+          return { handled: true };
+        },
+      };
+      child.saved = result.content[0].type === 'text' ? result.content[0].text! : '';
+      nested = child;
+      return child;
+    },
+  } });
+  const lines = (width = 100) => view.render(width).map(stripVTControlCharacters);
+  const dispatch = (label: string, width = 100, type: TuiMouseEvent['type'] = 'click') => {
+    const rendered = lines(width);
+    const y = rendered.findIndex(line => line.includes(label));
+    assert.ok(y >= 0, `missing ${label}: ${rendered.join('\n')}`);
+    return view.handleMouse({ ...click(y, rendered.length, width), x: 10, screenX: 10, type });
+  };
+  assert.ok(dispatch('当前 custom-agent')?.handled, 'whole activity line opens the group');
+  assert.ok(dispatch('✓ 修改')?.handled);
+  assert.match(lines().join('\n'), /Arguments[\s\S]*oldText[\s\S]*-1 before[\s\S]*\+1 after/);
+  assert.equal(view.rows.get(edit)?.open, true);
+  assert.ok(dispatch('… custom-agent')?.handled);
+  assert.ok(dispatch('▸ saved child invocation')?.handled);
+  assert.match(lines().join('\n'), /saved child parameter: value[\s\S]*saved nested output/);
+  const instance = nested;
+  for (const width of [100, 40, 100]) {
+    turn.result(custom, { content: [{ type: 'text', text: 'new saved nested output' }], isError: false }, true);
+    assert.match(lines(width).join('\n'), /new saved nested output/);
+    assert.equal(nested, instance, 'native lastComponent is retained on new results');
+    assert.equal(nested?.open, true);
+    assert.equal((view.rows.get(custom) as any).native.expanded, true, 'child clicks do not toggle the native parent region');
+    assert.equal(view.rows.get(custom)?.open, true);
+    assert.equal(view.rows.get(edit)?.open, true);
+    assert.equal(view.open, true);
+    assert.equal(dispatch('saved child invocation', width, 'wheel'), undefined);
+    assert.equal(dispatch('saved child invocation', width, 'drag'), undefined);
+    assert.equal(dispatch('当前 custom-agent', width, 'wheel'), undefined);
+    assert.ok(dispatch('▾ saved child invocation', width)?.handled);
+    assert.equal(nested?.open, false);
+    assert.ok(dispatch('▸ saved child invocation', width)?.handled);
+  }
+  turn.result(custom, { content: [{ type: 'text', text: 'final nested result' }], isError: false });
+  assert.match(lines().join('\n'), /final nested result/);
+  assert.equal(nested, instance);
+  assert.equal(nested?.open, true);
+  assert.doesNotMatch(lines().join('\n'), /当前/);
+  assert.ok(dispatch('✓ custom-agent')?.handled, 'item collapses after the activity line disappears');
+  assert.equal(view.rows.get(custom)?.open, false);
+  for (let i = 0; i < 3; i++) {
+    assert.ok(dispatch('▾ 已完成')?.handled);
+    assert.equal(view.open, false);
+    assert.ok(dispatch('▸ 已完成')?.handled);
+    assert.equal(view.open, true);
+    assert.ok(dispatch('✓ 修改')?.handled);
+    assert.match(lines().join('\n'), /-1 before[\s\S]*\+1 after/);
+  }
+  assert.equal(executions, 0);
+  view.dispose();
 });
 
 test('saved edit diff renders without reading today’s file', () => {

@@ -1,4 +1,5 @@
 import type { AssistantMessageComponent, ToolExecutionComponent } from '@earendil-works/pi-coding-agent';
+import { categories, compact, refreshPresentation, toolAction, toolCategory, toolTarget, type Category } from './presentation.ts';
 
 export type AssistantMessage = NonNullable<ConstructorParameters<typeof AssistantMessageComponent>[0]>;
 export type Result = Parameters<ToolExecutionComponent['updateResult']>[0];
@@ -6,6 +7,7 @@ export type Tool = {
   kind: 'tool'; id: string; name: string; args: Record<string, unknown>;
   result?: Result; status: 'pending' | 'running' | 'done' | 'error';
   revision: number; truncated: boolean;
+  diffSource?: string; diffStats?: { added: number; removed: number }; errorSummary?: string;
 };
 export type Assistant = { kind: 'assistant'; message: AssistantMessage; revision: number };
 export type Item = Tool | Assistant;
@@ -21,12 +23,42 @@ export class ProcessGroup {
   truncated = 0;
   revision = 0;
 
+  readonly categories: Record<Category, number> = { 读取: 0, 搜索: 0, 执行: 0, 修改: 0, 其他: 0 };
+  readonly pending = new Map<string, Tool>();
+  readonly runningTools = new Map<string, Tool>();
+  readonly failures = new Map<string, Tool>();
+
+  track(tool: Tool) {
+    for (const [status, map] of [['pending', this.pending], ['running', this.runningTools], ['error', this.failures]] as const) {
+      if (tool.status === status) map.set(tool.id, tool);
+      else map.delete(tool.id);
+    }
+  }
+
+  status(running: boolean): Tool['status'] {
+    if (this.failed) return 'error';
+    const unresolved = this.pending.size + this.runningTools.size;
+    if (running && (unresolved || !this.count)) return 'running';
+    return unresolved ? 'pending' : 'done';
+  }
+
   summary(running: boolean) {
-    const pending = this.count - this.completed - this.failed;
-    return `${running && pending ? 'Working' : 'Process'} · ${this.count ? `${this.count} tools` : 'thinking'}` +
-      (pending ? ` · ${pending} ${running ? 'pending' : 'unfinished'}` : '') +
-      (this.failed ? ` · ⚠ ${this.failed} failed` : '') +
-      (this.truncated ? ` · ⚠ ${this.truncated} truncated` : '');
+    const unresolved = this.pending.size + this.runningTools.size;
+    const state = { pending: '未完成', running: '进行中', done: '已完成', error: '失败' }[this.status(running)];
+    return state + categories.filter(category => this.categories[category])
+      .map(category => ` · ${category} ${this.categories[category]}`).join('') +
+      (!this.count ? ' · 思考' : '') +
+      (unresolved ? ` · 未完成 ${unresolved}` : '') +
+      (this.failed ? ` · 失败 ${this.failed}` : '') +
+      (this.truncated ? ` · 输出已截断 ${this.truncated}` : '');
+  }
+
+  activity(running: boolean) {
+    const current = this.runningTools.values().next().value as Tool | undefined;
+    const failure = this.failures.values().next().value as Tool | undefined;
+    // Put the failure first so a long parallel command cannot clip away its reason.
+    return (failure ? `失败 ${failure.errorSummary ?? '工具执行失败'} · ${toolAction(failure)} ${toolTarget(failure)}`.trimEnd() : '') +
+      (current ? `${failure ? ' · ' : ''}${running ? '当前' : '未完成'} ${toolAction(current)} ${toolTarget(current)}`.trimEnd() : '');
   }
 }
 
@@ -53,7 +85,11 @@ export class Turn {
       this.segments.push(this.activeGroup);
     }
     this.activeGroup.items.push(item);
-    if (item.kind === 'tool') this.activeGroup.count++;
+    if (item.kind === 'tool') {
+      this.activeGroup.count++;
+      this.activeGroup.categories[toolCategory(item)]++;
+      this.activeGroup.track(item);
+    }
     this.activeGroup.revision++;
     this.groupOf.set(item, this.activeGroup);
   }
@@ -71,6 +107,11 @@ export class Turn {
     }
     this.revision++;
     return tool;
+  }
+
+  startTool(tool: Tool, args: Record<string, unknown>) {
+    tool.args = args;
+    this.result(tool, { content: [], isError: false }, true);
   }
 
   startAssistant(message: AssistantMessage) {
@@ -137,6 +178,8 @@ export class Turn {
     tool.result = result;
     tool.status = partial ? 'running' : result.isError ? 'error' : 'done';
     tool.truncated = Boolean(result.details?.truncation?.truncated || result.details?.truncated);
+    refreshPresentation(tool, result, partial);
+    group.track(tool);
     for (const counts of [this, group]) {
       if (tool.status === 'done') counts.completed++;
       if (tool.status === 'error') counts.failed++;
@@ -153,17 +196,16 @@ export class Turn {
 
   summary() {
     const pending = this.tools.size - this.completed - this.failed;
-    return `${this.running ? 'Working' : 'Process'} · ${this.tools.size} tools` +
-      (pending ? ` · ${pending} ${this.running ? 'pending' : 'unfinished'}` : '') +
-      (this.failed ? ` · ⚠ ${this.failed} failed` : '') +
-      (this.truncated ? ` · ⚠ ${this.truncated} truncated` : '') +
-      (this.warnings.length ? ` · ⚠ ${this.warnings.length} alerts` : '');
+    const state = this.failed ? '失败' : this.running ? '进行中' : pending ? '未完成' : '已完成';
+    return `${state} · 工具 ${this.tools.size}` +
+      (pending ? ` · 未完成 ${pending}` : '') +
+      (this.failed ? ` · 失败 ${this.failed}` : '') +
+      (this.truncated ? ` · 输出已截断 ${this.truncated}` : '') +
+      (this.warnings.length ? ` · 警告 ${this.warnings.length}` : '');
   }
 }
 
 /** Bounded work even for megabyte commands; never split/scan the entire argument. */
 export function toolLabel(tool: Tool): string {
-  const value = tool.args.path ?? tool.args.file_path ?? tool.args.command ?? tool.args.query ?? '';
-  const prefix = typeof value === 'string' ? value.slice(0, 160).split(/[\r\n]/, 1)[0] : '';
-  return `${tool.name} ${prefix}`.trim().replace(/[\x00-\x1f\x7f-\x9f]/g, ' ');
+  return `${compact(tool.name)} ${toolTarget(tool)}`.trim();
 }

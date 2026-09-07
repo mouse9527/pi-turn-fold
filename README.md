@@ -7,11 +7,11 @@ Assistant text streams normally and stays visible. Consecutive tool calls and th
 ```text
 Your question
 
-▸ Process · 3 tools                     # a, b, c
+▸ 已完成 · 读取 2 · 执行 1                # a, b, c
 
 Found the issue. Next I'll update the config.   # streamed immediately
 
-▸ Process · 3 tools                     # d, e, f
+▸ 已完成 · 执行 1 · 修改 2                # d, e, f
 
 Fixed; tests passed.                    # also streamed immediately
 ```
@@ -19,16 +19,20 @@ Fixed; tests passed.                    # also streamed immediately
 Expand one process group, then an individual item:
 
 ```text
-▾ Process · 3 tools
-  ▸ Thinking
-  ▸ read src/auth.ts · done
-  ▸ bash python3 · done
-  ▾ edit src/auth.ts · done
+▾ 已完成 · 读取 1 · 执行 1 · 修改 1
+  ▸ 思考
+  ▸ ✓ 读取 src/auth.ts
+  ▸ ✓ 执行 python3
+  ▾ ✓ 修改 src/auth.ts +12 −4
     Arguments …
     [native saved edit diff]
 ```
 
-Groups expand independently. Later tool calls never pull earlier assistant text back into a fold. Plain-text answers without tools or thinking create no empty process row. This is **not** a final-answer-only Focus view.
+Labels use Chinese actions and call counts (not distinct-file counts). Known tools are categorized by their registered name, never by guessing shell commands; custom/MCP names remain visible in item rows and count under `其他`. Status glyphs (`○`, `…`, `✓`, `✗`) remain meaningful without color; colors come from Pi's current theme.
+
+Running groups add one `当前` command/path line; after the run stops, outstanding calls use `未完成` instead. Failed groups show a failure count and a short reason followed by the failed action/name and bounded target (for example `失败 退出码 1 · 执行 npm test`). A parallel current/outstanding call shares that same status line. The reason comes first so long targets cannot hide it; pending/unresolved calls are never labeled completed. These compact hints do not replace saved details. Only successful `edit` results with a valid saved, numbered Pi diff get `+added −removed` statistics.
+
+Groups expand independently, with Pi's standard outer message spacing. Click the group header or its activity line to show items, then an item row to inspect saved arguments, output and edit diffs inline. Open tool/native detail components are retained across streamed results; nested controls provided by a registered native renderer keep their own state. The plugin does not infer arbitrary Agent/MCP child executions from output text or invent a universal nested-call schema. Later tool calls never pull earlier assistant text back into a fold. Plain-text answers without tools or thinking create no empty process row. This is **not** a final-answer-only Focus view.
 
 Failures, aborted responses, truncation and unfinished calls are indicated outside the collapsed details. Pi's extension dialogs, notices, editor and execution behavior remain native.
 
@@ -68,7 +72,7 @@ Folding is **on by default**; there is no `/focus` step.
 | Immediately switch to native transcript | `/fold off` |
 | Immediately re-enable folding, without reloading | `/fold on` |
 
-User-turn and tool numbers start at 1 in the currently displayed, compaction-aware history; a user turn can contain several process groups. Regular terminal mode supports commands/keyboard, but not mouse clicks. `Ctrl+O` remains Pi's native tool-expansion control; it does **not** open process rows. Use the controls above for folded items.
+User-turn and tool numbers start at 1 in the currently displayed, compaction-aware history; a user turn can contain several process groups. Regular terminal mode supports commands/keyboard, but native Pi does not deliver mouse clicks there; this plugin does not enable terminal mouse capture or change your mode/settings. `Ctrl+O` remains Pi's native tool-expansion control; it does **not** open process rows. Use the controls above for folded items.
 
 `/fold on` and `/fold off` can be used while tools or text are streaming; they do not interrupt execution or reload other extensions. Turning off closes expanded plugin details. These switches affect the current runtime only: startup and `/reload` default to on. Updating the extension's **code** still requires one reload to load the new implementation.
 
@@ -82,7 +86,7 @@ Off is a display switch, not an unload: lightweight event/group state keeps trac
 - `write` shows saved written content. **No old-file snapshot means no trustworthy before/after diff.** This extension does not capture snapshots or change writes.
 - “Full output” means what Pi saved. Content already truncated by a tool cannot be recreated.
 - Custom extension notices and user-run `!` shell commands stay native and may occupy multiple lines. They are not silently hidden as assistant process.
-- No theme, animation, settings panel, snapshots, telemetry, new tools, or model calls.
+- No custom theme, animation, settings panel, snapshots, telemetry, new tools, or model calls.
 - **Internal runtime adaptation is required.** No Pi files are patched on disk, but private methods are wrapped in memory. Public extension APIs alone cannot implement this behavior. Unknown renderer conflicts and Pi upgrades can break it.
 
 ## Performance and validation
@@ -93,17 +97,17 @@ Local synthetic display microbenchmark (Node 22, Pi 0.85.1):
 
 | Saved calls | Visible process rows | Update + render p95 |
 | ---: | ---: | ---: |
-| 300 | 1 | ~0.015 ms |
-| 1,000 | 1 | ~0.012 ms |
-| 10,000 | 1 | ~0.011 ms |
-| 10,000 | 100 | ~0.67 ms |
-| 1,000 | 100, with 99 visible text separators | ~0.71 ms |
+| 300 | 1 | ~0.020 ms |
+| 1,000 | 1 | ~0.015 ms |
+| 10,000 | 1 | ~0.015 ms |
+| 10,000 | 100 | ~0.57 ms |
+| 1,000 | 100, with 99 visible text separators | ~0.58 ms |
 
 **These are not input-to-screen latency or total Pi CPU measurements.** They exclude footer statistics, host event/argument parsing, terminal writes and visible image conversion. Many expanded items, long streaming text, or many visible text/group segments can still be expensive. There is no blanket “never lags” claim.
 
 Verified locally:
 - State and native-component integration tests: live text, text/tool block ordering, independent group expansion, live/history parity, cached earlier text, parallel completion, failure visibility, lazy rendering, saved edit diff, click coordinates, cleanup and reinstall.
-- Actual bundled Pi CLI in isolated regular and fullscreen PTYs: restore 300 synthetic tool calls with three image attachments, split into two groups around visible middle text; two-level expansion; off/on without reload; reload; quit. No model request is sent.
+- Actual bundled Pi CLI in isolated regular and fullscreen PTYs: restore 300 synthetic tool calls with three image attachments, split into two groups around visible middle text; verify native message spacing from emitted rows; two-level command expansion; off/on without reload; reload; quit. No model request is sent. Inline mouse acceptance uses component event-dispatch tests (including nested registered renderers), not real terminal mouse input.
 - 50 repeated process expand/collapse cycles release detail rows; 50 off/on cycles retain the same canonical components/wrappers without stacking new ones.
 
 **Still needs manual acceptance:** Ghostty image pixel cleanup, real long-session input/scroll latency, and sustained heap/CPU profiling. PTY tests are not a substitute for those checks. Treat this as a prototype until your own session passes them.

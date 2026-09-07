@@ -17,6 +17,7 @@ export function installAdapter(version = VERSION) {
   let mode: Host;
   let disposed = false;
   let enabled = true;
+  let color: ViewHost['color'];
   let scope = 0;
   let live = false;
   let current: Turn | undefined;
@@ -54,6 +55,7 @@ export function installAdapter(version = VERSION) {
     current.running = live;
     const host: ViewHost = {
       ui: mode.ui, cwd: mode.sessionManager.getCwd(),
+      color: (name, text) => color?.(name, text) ?? text,
       toolDefinition: name => mode.getRegisteredToolDefinition(name),
       get showImages() { return mode.settingsManager.getShowImages(); },
       get imageWidthCells() { return mode.settingsManager.getImageWidthCells(); },
@@ -132,7 +134,7 @@ export function installAdapter(version = VERSION) {
     } else if (event.type.startsWith('tool_execution_')) {
       const [turn, tool] = toolFor(event);
       if (event.type === 'tool_execution_start') {
-        tool.args = event.args; tool.status = 'running'; tool.revision++; turn.revision++;
+        turn.startTool(tool, event.args ?? tool.args);
       } else if (event.type === 'tool_execution_update') {
         turn.result(tool, { ...event.partialResult, isError: false }, true);
       } else if (event.type === 'tool_execution_end') {
@@ -161,7 +163,20 @@ export function installAdapter(version = VERSION) {
     if (disposed || !mode) return false;
     if (enabled === value) return true;
     enabled = value;
-    if (enabled) projection.invalidate();
+    if (enabled) {
+      // Pi 0.85.1's native shell elapsed-time renderer can start while /fold off.
+      // Its final render is now gated: stop that display timer, never the execution.
+      // No generic custom-renderer disposal contract is assumed here.
+      for (const child of mode.chatContainer.children) {
+        if (!(child instanceof ToolExecutionComponent)) continue;
+        const native = child as any;
+        if ((native.toolName === 'bash' || native.toolName === 'powershell') && native.rendererState.interval) {
+          clearInterval(native.rendererState.interval);
+          native.rendererState.interval = undefined;
+        }
+      }
+      projection.invalidate();
+    }
     else {
       // Drop open detail views. Keep lightweight event state current for immediate re-enable.
       for (const view of views) if (view.open) view.toggle();
@@ -254,6 +269,7 @@ export function installAdapter(version = VERSION) {
     get captured() { return Boolean(mode); },
     get enabled() { return enabled && !disposed; },
     setEnabled,
+    setColor(value: ViewHost['color']) { color = value; mode?.ui.requestRender(true); },
     dispose,
     toggle(turn = views.length - 1, tool?: number) {
       if (!enabled || disposed) return false;

@@ -1,8 +1,8 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { stripVTControlCharacters } from 'node:util';
-import { AssistantMessageComponent, initTheme } from '@earendil-works/pi-coding-agent';
-import { Container, type Component, type TUI, type TuiMouseEvent } from '@earendil-works/pi-tui';
+import { AssistantMessageComponent, ToolExecutionComponent, initTheme } from '@earendil-works/pi-coding-agent';
+import { Container, Spacer, Text, type Component, type TUI, type TuiMouseEvent } from '@earendil-works/pi-tui';
 import { Turn, type AssistantMessage, type Result } from '../src/turns.ts';
 import { TurnView, type ViewHost } from '../src/view.ts';
 
@@ -126,7 +126,7 @@ test('mouse headers track text offsets, group toggles are independent, fold togg
   const view = new TurnView(twoGroups(), host);
   const clickHeader = (index: number) => {
     const lines = view.render(100).map(stripVTControlCharacters);
-    const headers = lines.flatMap((line, y) => /^[▸▾] Process/.test(line) ? [y] : []);
+    const headers = lines.flatMap((line, y) => /^[▸▾] 未完成/.test(line) ? [y] : []);
     assert.equal(headers.length, 2);
     const middleY = lines.findIndex(line => line.includes('middle paragraph'));
     assert.ok(headers[0] < middleY && middleY < headers[1]);
@@ -205,6 +205,88 @@ test('historical completed messages and live snapshots produce the same segment 
   assert.deepEqual(sequence(live), sequence(history));
   assert.equal(render(liveView), render(historyView));
   assert.deepEqual(messages, saved);
+});
+
+test('process outer spacing matches native message spacers, not native detail-box internal padding', () => {
+  assert.deepEqual(new Text('', 0, 0).render(80), [], 'empty Text was not a spacer');
+  const nativeAssistant = new AssistantMessageComponent(assistant([text('native text')]));
+  const nativeTool = new ToolExecutionComponent('probe', 'native', {}, {}, undefined, host.ui, host.cwd);
+  assert.equal(nativeTool.children[0].constructor.name, 'Spacer');
+  assert.deepEqual(nativeTool.children[0].render(80), new Spacer(1).render(80), 'native tool owns one outer separator');
+  for (const width of [100, 12, 7]) {
+    const nativeTextLines = nativeAssistant.render(width).map(stripVTControlCharacters);
+    assert.equal(nativeTextLines[0].trim(), '', 'native assistant owns a leading separator');
+    assert.notEqual(nativeTextLines.at(-1)!.trim(), '', 'native assistant has no trailing separator');
+    const turn = new Turn();
+    const tool = turn.tool('first', 'probe', {});
+    turn.result(tool, { content: [], isError: false });
+    const view = new TurnView(turn, host);
+    for (let repeat = 0; repeat < 5; repeat++) {
+      const lines = view.render(width).map(stripVTControlCharacters);
+      assert.deepEqual(lines.slice(0, 1), nativeTool.children[0].render(width));
+      assert.match(lines[1], /^[▸▾]/, 'first process gets native outer spacing, no detail-box padding');
+      view.toggle();
+    }
+    view.dispose();
+  }
+});
+
+test('native spacer leaves exactly one blank line from assistant text to process, with stable mouse offsets', () => {
+  for (const mixed of [false, true]) for (const historical of [false, true]) {
+    const turn = new Turn();
+    turn.running = !historical;
+    const view = new TurnView(turn, host);
+    const content = [text('说明 段末'), call('spacing')];
+    const messages = mixed ? [assistant(content, 'toolUse')] : [assistant([content[0]]), assistant([content[1]], 'toolUse')];
+    const gap = (width: number) => {
+      const lines = view.render(width).map(stripVTControlCharacters);
+      const headerY = lines.findIndex(line => /^[▸▾]/.test(line));
+      assert.ok(headerY >= 2);
+      assert.equal(lines[headerY - 1].trim(), '', `missing spacer: ${JSON.stringify(lines)}`);
+      assert.notEqual(lines[headerY - 2].trim(), '', 'exactly one separator, not accumulated blank lines');
+      return { lines, headerY };
+    };
+    for (const message of messages) {
+      if (!historical) {
+        turn.startAssistant(assistant([]));
+        for (const block of message.content.map((_, i) => message.content.slice(0, i + 1))) {
+          for (let repeat = 0; repeat < 3; repeat++) {
+            turn.updateAssistant(assistant(block, 'pending'));
+            view.render(100);
+            if (turn.tools.size) for (const width of [100, 12, 7]) gap(width);
+          }
+        }
+      }
+      turn.endAssistant(message);
+    }
+    const tool = turn.tools.get('spacing')!;
+    for (const width of [100, 12, 7]) gap(width);
+    turn.running = true;
+    turn.startTool(tool, tool.args);
+    for (let repeat = 0; repeat < 10; repeat++) {
+      const { lines, headerY } = gap(100);
+      assert.match(lines[headerY + 1], /当前 probe spacing/);
+      const y = headerY + 1;
+      const event: TuiMouseEvent = { type: 'click', button: 'left', x: 1, y, screenX: 1, screenY: y,
+        width: 100, height: lines.length, shift: false, ctrl: false, alt: false };
+      assert.ok(view.handleMouse(event)?.handled, 'activity line stays aligned after the spacer');
+      const opened = gap(100);
+      assert.equal(opened.headerY, headerY);
+      assert.match(opened.lines[headerY + 2], /▸ … probe spacing/);
+      assert.ok(view.handleMouse({ ...event, y: headerY + 2, screenY: headerY + 2, height: opened.lines.length })?.handled);
+      assert.equal(view.rows.get(tool)?.open, true);
+      view.render(100);
+      view.toggle();
+      turn.result(tool, { content: [text('partial')], isError: false }, true);
+      gap(7);
+    }
+    turn.result(tool, { content: [], isError: false });
+    turn.finish();
+    const done = gap(100);
+    assert.doesNotMatch(done.lines.join('\n'), /当前/);
+    assert.equal(done.lines.length, done.headerY + 1);
+    view.dispose();
+  }
 });
 
 test('visible text transformers receive live and finalized streaming flags', () => {

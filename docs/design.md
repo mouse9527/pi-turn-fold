@@ -16,7 +16,7 @@ The adapter calls the original event and historical rendering methods. Native to
 - `ToolExecutionComponent.updateDisplay`: suppress native argument/result/diff layout for canonical tools.
 - `ToolExecutionComponent.maybeConvertImagesForKitty`: no image conversion for canonical hidden tools.
 
-Independent native detail components are constructed only when the user opens an item. They receive a guarded rendering callback; callbacks from closed detail components cannot trigger further host redraws. Native image conversion already in flight is not cancellable and may finish after collapse.
+Independent native detail components are constructed only when the user opens an item. Open tool details receive argument/result updates on the existing native component rather than being reconstructed per result; this retains renderer state and `lastComponent`, including registered nested disclosure controls. Native result regions still dispatch to their children first; the plugin consumes clicks only on its separate group/item headers. Arbitrary nested Agent/MCP record schemas are not interpreted: nested inspection depends on saved content and the registered renderer, never inferred/re-executed child calls. They receive a guarded rendering callback; callbacks from closed detail components cannot trigger further host redraws. Native image conversion already in flight is not cancellable and may finish after collapse.
 
 ## Visible tree
 
@@ -40,9 +40,19 @@ No final-answer classifier or end-of-run visibility gate is needed. A text-only 
 
 Assistant error, abort and length stops create visible alert text, including when there is no final answer. An error/abort also marks outstanding tool rows failed for display, matching native Pi's treatment. Tool `isError`, structured truncation metadata and unresolved calls appear in process counts. Unknown tool-specific textual truncation formats cannot always be classified automatically; the saved output remains available.
 
+## Compact tool presentation
+
+Each group keeps fixed `读取 / 搜索 / 执行 / 修改 / 其他` call counters and pending/running/failure maps keyed by tool ID. Repeated results first remove previous status contributions, so out-of-order completions and corrected results do not double count. The oldest still-running call supplies `当前` while the turn is running; completing it exposes the next running call without scanning saved history. After the turn stops, the same outstanding call is labeled `未完成`, without changing its execution status or inventing a result. Failures show the brief reason first, then the failed action/original custom name and bounded target; a parallel current/outstanding call follows on the same single status line. Unresolved calls remain unfinished even after the agent ends. Names, not shell-command heuristics, determine categories; unknown names stay intact in the bounded item label.
+
+The header and optional activity/failure line share a single `MouseRegion` and actual `Container` layout. A leading native `Spacer(1)` matches Pi's outer message-block convention: visible native assistants begin with one spacer and render Markdown with zero vertical padding; native tool components also begin with one spacer. Their background-box padding is internal detail framing, not an extra compact-header margin. The previous empty `Text('', 0, 0)` rendered no rows, so it failed to supply that outer separation. The spacer sits outside the header hit region and is not accumulated on updates/toggles. Result updates change dynamic labels without rebuilding the header/history tree. Lightweight item rows combine disclosure arrows, status glyphs, Chinese actions and the command/path. Raw strings are sanitized before the injected `ctx.ui.theme.fg` callback applies trusted host styling; cell-aware clipping preserves ANSI styling and CJK widths. No second theme singleton or terminal palette is introduced for these rows.
+
+Error summaries inspect only the last eight content blocks and at most 1,024 trailing characters per candidate; structured errors are clipped before sanitizing. This intentionally may fall back to a generic failure if the useful reason is outside that bounded suffix. Shell exit/timeout/abort suffixes get short Chinese labels. Only result-event processing examines failure text or saved diffs; layout reads cached hints, never full saved output/diff content.
+
 ## Diff correctness
 
 A historical `edit` renderer must not call `computeEditsDiff` against the current file. The detail view wraps only its presentation callback and forces `argsComplete: false`; the result renderer still receives the saved diff. It does not change tool execution or stored arguments.
+
+Successful final `edit` results cache added/removed counts from Pi's saved, numbered display diff; invalid/unrecognized formats show no stats. Identical repeated diffs reuse the cached counts. Partial or failed edits never show success statistics.
 
 `write` has no historical before-image by default. Its written content is shown with an explicit notice, never labeled as a reconstructed before/after diff.
 
@@ -50,7 +60,7 @@ A historical `edit` renderer must not call `computeEditsDiff` against the curren
 
 `/fold off` switches layout and mouse dispatch to the native transcript and bypasses presentation gates. It hydrates canonical native components once and closes/releases open plugin detail rows. Historical edit previews are disabled during that hydration. The lightweight turn/group event state continues tracking; no polling or periodic work is added.
 
-`/fold on` switches back to the current projection and invalidates its display caches. It does not replay agent events, reset pending tools, alter the streaming component, re-register hooks, or reload other extensions. Both operations are idempotent and supported mid-stream. Native caches populated while off can remain in memory afterward; off/on is not a substitute for a fresh-process no-extension baseline. Switches are session-runtime state, not persisted configuration.
+`/fold on` switches back to the current projection and invalidates its display caches. Pi 0.85.1's canonical `bash`/`powershell` renderer may have started an elapsed-time interval while native display was active. Enabling folding clears that `rendererState.interval`, because gated final rendering could otherwise leave it ticking forever. This is a pinned shell-display cleanup, not execution cancellation or a generic disposal contract for custom renderers. Folded detail shells never mark execution started, so they do not start that native elapsed timer. It does not replay agent events, reset pending tools, alter the streaming component, re-register hooks, or reload other extensions. Both operations are idempotent and supported mid-stream. Native caches populated while off can remain in memory afterward; off/on is not a substitute for a fresh-process no-extension baseline. Switches are session-runtime state, not persisted configuration.
 
 Full disposal is separate: every method wrapper keeps its previous descriptor. Disposal restores only slots still owned by this adapter, removes its anchors and releases projection references; it never overwrites a later extension's wrapper. The duplicate-install marker prevents stacking this adapter with itself. Lifecycle shutdown disposes without requesting a render after terminal shutdown. Reload reconstructs the display via Pi's ordinary path and defaults to enabled.
 

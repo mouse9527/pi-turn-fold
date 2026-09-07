@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { stripVTControlCharacters } from 'node:util';
-import { InteractiveMode, AssistantMessageComponent, ToolExecutionComponent, VERSION, initTheme } from '@earendil-works/pi-coding-agent';
+import { InteractiveMode, AssistantMessageComponent, ToolExecutionComponent, VERSION, initTheme, createBashToolDefinition } from '@earendil-works/pi-coding-agent';
 import { Container, Text } from '@earendil-works/pi-tui';
 import { installAdapter } from '../src/adapter.ts';
 import type { AssistantMessage } from '../src/turns.ts';
@@ -127,7 +127,7 @@ test('installed Pi 0.85.1 streams parallel tools with a folded projection and ca
     assert.equal(adapter.views[0].turn.running, false);
     const folded = text(mode.chatContainer);
     assert.match(folded, /user-visible/);
-    assert.match(folded, /Process · 2 tools/);
+    assert.match(folded, /已完成 · 其他 2/);
     assert.match(folded, /final-answer-visible/);
     assert.match(folded, /intermediate-visible/);
     assert.doesNotMatch(folded, /secret-thinking|final-thinking-hidden|saved-output|native-probe-call/);
@@ -149,7 +149,7 @@ test('installed Pi 0.85.1 streams parallel tools with a folded projection and ca
     const restored = text(mode.chatContainer);
     assert.match(restored, /intermediate-visible/);
     assert.match(restored, /saved-output-a/);
-    assert.doesNotMatch(restored, /Process · 2 tools/);
+    assert.doesNotMatch(restored, /已完成 · 其他 2/);
     adapter.dispose(true);
     const second = installAdapter();
     try {
@@ -185,8 +185,9 @@ test('real historical rendering routes late results to their owning turns and re
     const folded = text(mode.chatContainer);
     assert.match(folded, /historical-answer/);
     assert.match(folded, /historical-provider-error/);
-    assert.match(folded, /1 failed/);
-    assert.doesNotMatch(folded, /saved-output/);
+    assert.match(folded, /失败 1/);
+    assert.match(folded, /失败 saved-output-failed/);
+    assert.doesNotMatch(folded, /saved-output-old/);
     assert.deepEqual([counters.renderCall, counters.renderResult], [0, 0]);
     adapter.toggle(0, 0);
     assert.match(text(mode.chatContainer), /saved-output-old/);
@@ -266,7 +267,7 @@ test('off/on is immediate, idempotent and does not stack wrappers or components 
       assert.equal(adapter.setEnabled(false), true);
       assert.equal(adapter.enabled, false);
       assert.match(text(mode.chatContainer), /saved-output-a/);
-      assert.doesNotMatch(text(mode.chatContainer), /Process ·/);
+      assert.doesNotMatch(text(mode.chatContainer), /已完成 · 其他/);
       assert.equal(view.rows.size, 0);
       const calls = counters.renderCall;
       adapter.setEnabled(false);
@@ -274,7 +275,7 @@ test('off/on is immediate, idempotent and does not stack wrappers or components 
       assert.equal(adapter.toggle(), false, 'fold shortcuts do not operate on the hidden projection');
       assert.equal(adapter.setEnabled(true), true);
       assert.equal(adapter.enabled, true);
-      assert.match(text(mode.chatContainer), /Process · 1 tools/);
+      assert.match(text(mode.chatContainer), /已完成 · 其他 1/);
       assert.match(text(mode.chatContainer), /switch-answer/);
       assert.doesNotMatch(text(mode.chatContainer), /saved-output-a/);
       assert.equal(counters.renderCall, calls, 'on must not invoke hidden native tool renderers');
@@ -315,8 +316,9 @@ test('switching during tools and streaming text preserves native execution and l
     await mode.handleEvent({ type: 'tool_execution_end', toolCallId: 'live', result: failed, isError: true });
     await mode.handleEvent({ type: 'message_end', message: failed });
     assert.equal(pending.size, 0);
-    assert.match(text(mode.chatContainer), /1 failed/);
-    assert.doesNotMatch(text(mode.chatContainer), /saved-output/);
+    assert.match(text(mode.chatContainer), /失败 1/);
+    assert.match(text(mode.chatContainer), /失败 saved-output-live/);
+    assert.doesNotMatch(text(mode.chatContainer), /saved-output-progress|native-probe-call/);
     assert.equal(counters.renderCall, calls);
     await mode.handleEvent({ type: 'message_start', message: assistant([]) });
     await mode.handleEvent({ type: 'message_update', message: assistant([{ type: 'text', text: 'partial' }], 'pending') });
@@ -335,6 +337,55 @@ test('switching during tools and streaming text preserves native execution and l
     assert.equal(adapter.views[0].turn.failed, 1);
     assert.equal(adapter.views[0].turn.items.filter(item => item.kind === 'assistant').length, 2);
   } finally { adapter.dispose(true); }
+});
+
+test('native bash elapsed timer is cleared when folding resumes, without stopping execution', async t => {
+  const { mode, session } = host();
+  const definition = createBashToolDefinition(process.cwd());
+  session.getToolDefinition = (() => definition) as unknown as typeof session.getToolDefinition;
+  const clear = t.mock.method(globalThis, 'clearInterval');
+  const adapter = installAdapter();
+  let native: any;
+  try {
+    await mode.handleEvent({ type: 'agent_start' });
+    await mode.handleEvent({ type: 'message_start', message: user('timer-switch') });
+    adapter.setEnabled(false);
+    await mode.handleEvent({ type: 'message_start', message: assistant([]) });
+    const planning = assistant([{ type: 'toolCall', id: 'shell', name: 'bash', arguments: { command: 'never executed' } }], 'toolUse');
+    await mode.handleEvent({ type: 'message_update', message: planning });
+    await mode.handleEvent({ type: 'message_end', message: planning });
+    native = mode.pendingTools.get('shell');
+    assert.equal(native instanceof ToolExecutionComponent, true);
+    await mode.handleEvent({ type: 'tool_execution_start', toolCallId: 'shell', toolName: 'bash', args: { command: 'never executed' } });
+    const partial = { content: [{ type: 'text', text: 'synthetic progress' }], isError: false };
+    await mode.handleEvent({ type: 'tool_execution_update', toolCallId: 'shell', partialResult: partial });
+    const interval = native.rendererState.interval;
+    assert.ok(interval, 'real native shell renderer started its elapsed-time timer');
+    adapter.setEnabled(true);
+    assert.equal(native.rendererState.interval, undefined);
+    assert.ok(clear.mock.calls.some(call => call.arguments[0] === interval));
+    assert.equal(mode.pendingTools.get('shell'), native);
+    assert.equal(native.executionStarted, true);
+    assert.equal(native.isPartial, true);
+    assert.match(text(mode.chatContainer), /当前 执行 never executed/);
+    adapter.setEnabled(false);
+    const resumed = native.rendererState.interval;
+    assert.ok(resumed, 'native display may resume its own timer while off');
+    adapter.setEnabled(true);
+    assert.equal(native.rendererState.interval, undefined);
+    assert.ok(clear.mock.calls.some(call => call.arguments[0] === resumed));
+    await mode.handleEvent({ type: 'tool_execution_end', toolCallId: 'shell', result: partial, isError: false });
+    assert.equal(native.rendererState.interval, undefined);
+    assert.equal(native.isPartial, false);
+    assert.equal(mode.pendingTools.size, 0);
+    assert.match(text(mode.chatContainer), /已完成 · 执行 1/);
+    adapter.setEnabled(false);
+    assert.equal(native.rendererState.interval, undefined, 'final native hydration cannot restart it');
+    await mode.handleEvent({ type: 'agent_end' });
+  } finally {
+    adapter.dispose(true);
+    if (native?.rendererState.interval) clearInterval(native.rendererState.interval);
+  }
 });
 
 test('version and duplicate-install guards leave original descriptors intact', () => {

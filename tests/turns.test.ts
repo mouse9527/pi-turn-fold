@@ -21,7 +21,7 @@ test('parallel tools reconcile execution and persisted results without double co
   assert.equal(turn.completed, 1);
   assert.equal(turn.failed, 1);
   assert.equal(turn.truncated, 1);
-  assert.match(turn.summary(), /1 failed/);
+  assert.match(turn.summary(), /失败 1/);
   assert.equal(JSON.stringify(message), before);
 });
 
@@ -31,7 +31,7 @@ test('assistant message records and terminal failures survive later messages', (
   turn.startAssistant(assistant([], 'pending'));
   assert.equal(turn.final, undefined);
   turn.endAssistant(assistant([{ type: 'toolCall', id: 'a', name: 'bash', arguments: {} }], 'aborted'));
-  assert.match(turn.summary(), /alerts/);
+  assert.match(turn.summary(), /警告 1/);
   assert.match(turn.warnings.join(), /aborted/);
   turn.endAssistant(assistant([{ type: 'text', text: 'partial answer' }], 'length'));
   turn.finish();

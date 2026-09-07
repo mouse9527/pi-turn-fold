@@ -10,6 +10,7 @@ export default function(pi: ExtensionAPI) {
 
   pi.on('session_start', (_event, ctx) => {
     if (ctx.mode !== 'tui') { adapter?.dispose(); adapter = undefined; return; }
+    adapter?.setColor((name, text) => ctx.ui.theme.fg(name, text));
     const conflicts = pi.getCommands().filter(command =>
       /^(ccstyle|tool-display|compact-tools|tidy-bash|compact-transcript)$/.test(command.name));
     if (conflicts.length) {

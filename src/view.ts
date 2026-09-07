@@ -1,10 +1,12 @@
 import { stripVTControlCharacters } from 'node:util';
 import { AssistantMessageComponent, ToolExecutionComponent, getMarkdownTheme } from '@earendil-works/pi-coding-agent';
-import { Container, MouseRegion, Text, truncateToWidth, type Component, type TUI } from '@earendil-works/pi-tui';
-import { Turn, ProcessGroup, toolLabel, type Item, type Tool, type TextSegment } from './turns.ts';
+import { Container, MouseRegion, Spacer, Text, truncateToWidth, type Component, type TUI } from '@earendil-works/pi-tui';
+import { Turn, ProcessGroup, type Item, type Tool, type TextSegment } from './turns.ts';
+import { statusColor, toolRow } from './presentation.ts';
 
 export type ViewHost = {
   ui: TUI;
+  color?(name: typeof statusColor[keyof typeof statusColor], text: string): string;
   cwd: string;
   toolDefinition(name: string): ConstructorParameters<typeof ToolExecutionComponent>[4];
   showImages: boolean;
@@ -12,9 +14,13 @@ export type ViewHost = {
   markdownTransformers: ConstructorParameters<typeof AssistantMessageComponent>[5];
 };
 
-function line(text: () => string): Component {
+function line(text: () => string, style: (text: string) => string = text => text, optional = false): Component {
   return {
-    render: width => [truncateToWidth(text().replace(/[\x00-\x1f\x7f-\x9f]/g, ' '), width)],
+    render: width => {
+      const raw = stripVTControlCharacters(text()).replace(/[\x00-\x1f\x7f-\x9f]/g, ' ');
+      // Only trusted host styling may introduce ANSI; clipping preserves its reset sequences.
+      return optional && !raw ? [] : [truncateToWidth(style(raw), width)];
+    },
     invalidate() {},
   };
 }
@@ -26,6 +32,8 @@ export class ItemView extends Container {
   open = false;
   private seen = -1;
   private detail?: Component;
+  private native?: ToolExecutionComponent;
+  private argumentsText?: Text;
   private alive?: { value: boolean };
 
   constructor(item: Item, host: ViewHost) {
@@ -46,6 +54,8 @@ export class ItemView extends Container {
     if (this.alive) this.alive.value = false;
     this.alive = undefined;
     this.detail = undefined;
+    this.native = undefined;
+    this.argumentsText = undefined;
     this.seen = -1;
   }
 
@@ -54,10 +64,10 @@ export class ItemView extends Container {
     this.addChild(new MouseRegion(line(() => {
       const item = this.item;
       const label = item.kind === 'tool'
-        ? `${toolLabel(item)} · ${item.status}${item.truncated ? ' · truncated' : ''}`
-        : 'Thinking';
+        ? toolRow(item)
+        : '思考';
       return `  ${this.open ? '▾' : '▸'} ${label}`;
-    }), event => {
+    }, text => this.host.color?.(this.item.kind === 'tool' ? statusColor[this.item.status] : 'muted', text) ?? text), event => {
       if (event.type !== 'click' || event.button !== 'left') return;
       this.toggle();
       return { handled: true };
@@ -67,7 +77,8 @@ export class ItemView extends Container {
   private toolDetail(tool: Tool): Component {
     const box = new Container();
     // Native edit rendering omits some arguments; keep an exact saved-input inspector.
-    box.addChild(new Text(`Arguments\n${JSON.stringify(tool.args, null, 2)}`, 2, 0));
+    this.argumentsText = new Text(`Arguments\n${JSON.stringify(tool.args, null, 2)}`, 2, 0);
+    box.addChild(this.argumentsText);
     let definition = this.host.toolDefinition(tool.name);
     if (tool.name === 'edit' && definition?.renderCall) {
       const renderCall = definition.renderCall;
@@ -76,7 +87,7 @@ export class ItemView extends Container {
     }
     const alive = this.alive = { value: true };
     const ui = { requestRender: () => { if (alive.value) this.host.ui.requestRender(); } } as TUI;
-    const native = new ToolExecutionComponent(tool.name, tool.id, tool.args, {
+    const native = this.native = new ToolExecutionComponent(tool.name, tool.id, tool.args, {
       showImages: this.host.showImages, imageWidthCells: this.host.imageWidthCells,
     }, definition, ui, this.host.cwd);
     native.setExpanded(true);
@@ -88,14 +99,21 @@ export class ItemView extends Container {
 
   override render(width: number): string[] {
     if (this.open && this.seen !== this.item.revision) {
-      this.release();
-      this.rebuild();
-      this.detail = this.item.kind === 'tool'
-        ? this.toolDetail(this.item)
-        : new AssistantMessageComponent({ ...this.item.message, stopReason: 'stop',
-          content: this.item.message.content.filter(block => block.type === 'thinking') },
-          false, getMarkdownTheme(), 'Thinking...', 1, this.host.markdownTransformers);
-      this.addChild(this.detail);
+      if (this.item.kind === 'tool' && this.native) {
+        // Retain native renderer state/lastComponent, including its nested disclosure state.
+        this.argumentsText!.setText(`Arguments\n${JSON.stringify(this.item.args, null, 2)}`);
+        this.native.updateArgs(this.item.args);
+        if (this.item.result) this.native.updateResult(this.item.result, this.item.status === 'running');
+      } else {
+        this.release();
+        this.rebuild();
+        this.detail = this.item.kind === 'tool'
+          ? this.toolDetail(this.item)
+          : new AssistantMessageComponent({ ...this.item.message, stopReason: 'stop',
+            content: this.item.message.content.filter(block => block.type === 'thinking') },
+            false, getMarkdownTheme(), 'Thinking...', 1, this.host.markdownTransformers);
+        this.addChild(this.detail);
+      }
       this.seen = this.item.revision;
     }
     return super.render(width);
@@ -138,11 +156,18 @@ class ProcessView extends Container {
   }
 
   private sync() {
-    if (this.seen === this.group.revision) return;
-    this.seen = this.group.revision;
+    if (this.seen === this.group.items.length) return;
+    this.seen = this.group.items.length;
     this.clear();
-    this.addChild(new Text('', 0, 0));
-    this.addChild(new MouseRegion(line(() => `${this.open ? '▾' : '▸'} ${this.group.summary(this.turn.running)}`), event => {
+    this.addChild(new Spacer(1));
+    const header = new Container();
+    const style = (text: string) => this.host.color?.(statusColor[this.group.status(this.turn.running)], text) ?? text;
+    header.addChild(line(() => `${this.open ? '▾' : '▸'} ${this.group.summary(this.turn.running)}`, style));
+    header.addChild(line(() => {
+      const activity = this.group.activity(this.turn.running);
+      return activity ? `  ${activity}` : '';
+    }, style, true));
+    this.addChild(new MouseRegion(header, event => {
       if (event.type !== 'click' || event.button !== 'left') return;
       this.toggle();
       return { handled: true };
