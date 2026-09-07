@@ -8,10 +8,11 @@
 - **推荐**：Git 安装作为一等分发方式；annotated tag 固定源码，GitHub Release 提供说明、兼容性和验证证据。
 - **已有**：公开 MIT 仓库、Pi package manifest、源码 TS、lockfile，以及 `.github/workflows/ci.yml` 的 push/PR 检查。
 - CI 已配置 `npm ci --ignore-scripts`、typecheck、node:test、microbench、真实 bundled Pi CLI 的 regular/fullscreen 隔离 PTY smoke。
-- 本次只读查询 GitHub tags API 返回 `[]`，`gh release list` 为空；历史版本号/版本提交不等于已有公开 Release。
+- **当前**：`main` 仍是开发分支，没有有意发布的 tag/Release；前次只读查询 tags API 返回 `[]`、`gh release list` 为空（本次未重新查询）。历史版本号/版本提交不等于公开 Release。
+- **未来建议，尚未实施**：`dev` 承载开发/候选，默认分支 `main` 仅接收已验证的正式发布 SHA；届时无 ref 安装才可作为稳定更新渠道。现在无 ref 得到的是最新开发源码，不宣称稳定。
 - **尚未实现/本方案不新增**：release workflow、tag 保护规则、npm 分发、自动版本提升或自动 release notes。
 - 先用人工 `gh release create --draft` + 审核后发布；已有 CI 足够，不新增流水线、token 或发布依赖。
-- TS 由 Pi extension loader 加载，无运行时 build；不上传虚假的 dist、二进制或 node_modules。GitHub 自带源码归档足够。
+- TS 源码由 Pi extension loader 直接加载；用户无需本地 `tsc` 或 `npm run build`，维护者也不生成发布 build。Pi 仍可能自动安装依赖；不上传 dist、二进制或 node_modules，GitHub 自带源码归档足够。
 - 运行时没有新增第三方依赖，Pi 核心 imports 由宿主提供；开发依赖不等于运行时捆绑依赖。
 
 ## 2. 版本与状态必须分开
@@ -59,6 +60,7 @@ optional peers 的 `*` 是 Pi 核心供给/装载声明，**不是宿主兼容�
 ## 4. 维护者准备与本地验证（批准后执行）
 
 先等功能合入、review 完成，再在维护者干净 checkout 执行；不要操作另一位开发者的在途工作树。
+以下命令以未来渠道策略已获批准并建立、`dev` 分支已存在为前提；候选及正式版准备都在 `dev` 完成，RC 不进入 `main`。以下是检查/验收，不是本地构建或产物发布。
 `origin` 应指向 `https://github.com/mouse9527/pi-turn-fold.git`（SSH 同仓库也可）。
 
 ```bash
@@ -69,6 +71,8 @@ VERSION=0.3.0-rc.1
 TAG=v$VERSION
 git remote -v
 test -z "$(git status --porcelain)"
+git switch dev
+test "$(git branch --show-current)" = dev
 npm version "$VERSION" --no-git-tag-version --ignore-scripts
 # 核对 package.json 与 package-lock.json 同步；人工更新 README 的实际变化/限制。
 git diff -- package.json package-lock.json README.md
@@ -109,6 +113,25 @@ gh run watch "$RUN_ID" --repo "$REPO" --exit-status
 test "$(gh run view "$RUN_ID" --repo "$REPO" --json headSha --jq .headSha)" = "$SHA"
 test "$(gh run view "$RUN_ID" --repo "$REPO" --json headBranch --jq .headBranch)" = "$BRANCH"
 test "$(gh run view "$RUN_ID" --repo "$REPO" --json conclusion --jq .conclusion)" = success
+```
+
+未来正式版晋升（RC 跳过）：先在 `dev` 完成正式版本号的准确 SHA CI + 第 3 节人工门禁，保存证据；维护者批准后才执行：
+
+```bash
+git fetch origin
+git switch main
+git merge --ff-only origin/main
+git merge --ff-only "$SHA"
+test "$(git rev-parse HEAD)" = "$SHA"
+git push origin main
+BRANCH=main
+```
+
+只能 fast-forward 到已验证 SHA，不可 squash/生成未验证 merge commit；无法快进就停止，在 `dev` 整理后重新验证新 SHA。
+晋升后按上面的分支 CI 命令重新选择 `main`、同一 `$SHA` 的 push 运行并通过，再继续 tag。
+`main` push 已让原生更新用户取得源码，不能等 Release 发布才算门禁；因此人工批准必须在晋升前完成。GitHub Release 是公告，不是下载开关。
+
+```bash
 test "$(git rev-parse HEAD)" = "$SHA"
 test -z "$(git status --porcelain)"
 git ls-remote --tags origin "refs/tags/$TAG" "refs/tags/$TAG^{}"
@@ -153,18 +176,23 @@ gh release view "$TAG" --repo "$REPO" --json url,isDraft,isPrerelease,tagName
 
 ## 6. 用户安装、升级与本地路径
 
-下面的 tag 只有维护者实际推送后才可安装；包命令必须是 `pi` 后第一个参数，不写 `pi --flag install ...`。
+最新源码安装与 Pi 原生插件更新（**今天是开发渠道**；未来 `main` 稳定策略落实后才是稳定渠道）：
 
 ```bash
-pi install git:github.com/mouse9527/pi-turn-fold@v0.3.0-rc.1
-pi install git:github.com/mouse9527/pi-turn-fold@v0.3.0
+pi install git:github.com/mouse9527/pi-turn-fold
+pi update --extension git:github.com/mouse9527/pi-turn-fold
+# 或更新所有 Pi 扩展包，不升级 Pi 宿主：
+pi update --extensions
 pi list
-# 项目级安装用：pi install git:github.com/mouse9527/pi-turn-fold@v0.3.0 -l
+# 锁定版本（示例 tag 仅在实际推送后可用）；升版重新 install 新 tag：
+pi install git:github.com/mouse9527/pi-turn-fold@v0.3.0
+# 项目级安装加 -l；包命令须紧跟 pi，不写 pi --flag install ...。
 ```
 
-- 带 tag/commit 是固定 ref：`pi update --extensions` / `--all` 会协调 checkout，但不会跳到下一版本；升版需再次 `pi install ...@new-ref`。
-- 不带 ref 的 `pi install git:github.com/mouse9527/pi-turn-fold` 跟随仓库默认分支，可能拿到尚无 Release 的开发代码，不推荐给稳定用户。
-- `pi update --extension git:github.com/mouse9527/pi-turn-fold` 定向更新该 Git 包；固定 ref 仍固定，无 ref 才随分支更新。
+- 无 ref 首次 clone 使用默认分支；后续原生更新按托管 checkout 的 upstream（无 upstream 时回退远端默认分支），**不查询 GitHub Latest Release API**。Release 标记 Latest 不会改变更新目标。
+- `@latest` 只是名为 `latest` 的 Git ref，不是 GitHub Latest Release 别名；不建议维护移动 latest tag，也不新增自定义 updater。
+- immutable `@vTAG` / commit 锁定版本，不自动跳到新版本；升级用 `pi install git:github.com/mouse9527/pi-turn-fold@新tag`。Git 包身份按不含 ref 的仓库 URL，重新安装新 tag 是换版本，不是另装一份。
+- 更新检查跳过 pinned Git ref，但显式更新仍 fetch 配置的 ref 并协调 checkout；branch ref 或刻意移动的 tag 可能变化，不能泛称所有 `@ref` 永不移动。本项目版本 tag 不移动。
 - 单独 `pi update` 更新的是 **Pi 本身**，不是扩展；`--all` 还会升级宿主，可能触发 0.85.1 guard，勿作为本插件推荐升级步骤。
 - 本地源 `pi install /absolute/path/to/pi-turn-fold` 不复制文件；相对路径相对其 settings 文件解析。
 - 当前 `../../workspace/pi-turn-fold` 安装指向本地源码，发布 tag 不会替它切版本；源码变化只需重新加载，不由 package update 拉新代码。
@@ -198,7 +226,7 @@ Pi 协调 Git ref 时可能 reset + clean checkout，并在存在 package.json �
 - Pi 0.85.1 only；私有 runtime adapter；其他版本拒绝激活。
 - Node / OS / Ghostty 的实际验证版本；regular/fullscreen；冲突 renderer 说明。
 ## Install / Upgrade / Rollback
-- 新 tag 的 pi install 命令；一次 /reload；已验证旧 ref 的回滚命令。
+- 无 ref 安装/原生插件更新命令及当前渠道状态；immutable tag 锁版/换版命令；一次 /reload；已验证旧 ref 回滚。
 ## Verification
 - 完整 commit SHA、annotated tag、CI run URL；check/test/bench/两种 PTY 结果。
 - 人工验收人/日期/环境/样本规模；失败、abort、saved diff 与图片检查结果。
@@ -207,6 +235,6 @@ Pi 协调 Git ref 时可能 reset + clean checkout，并在存在 package.json �
 - write 无旧快照；截断内容不可恢复；不兼容其他 transcript renderer。
 ```
 
-默认决定：先 GitHub 手动发布，不上 npm。仅当需要 npm 搜索/registry 安装或确有用户需求时再申请 npm 名称、内容审计和凭据方案；不要假设版本 range 自动升级（Pi 文档规定 versioned npm specs 固定且跳过更新）。
+默认决定：先 GitHub 手动发布，不上 npm。仅当需要 npm 搜索/registry 安装或确有用户需求时再申请 npm 名称、内容审计和凭据方案；若采用该渠道，npm 更新语义须按届时 Pi 版本另行核验。
 若人工发布频率真正成为负担，再单独批准最小 `workflow_dispatch` + 人工 environment gate；本轮不创建 workflow、不改权限或保护规则。
-依据：基线 package/CI/README、adapter 与测试；完整阅读已安装 Pi 的 `docs/packages.md`、`quickstart.md`、`usage.md`。官方语义以对应 Pi 版本文档为准，后续宿主升级重新核对。
+依据：原方案基线 package/CI/README、adapter 与测试；本次完整核对已安装 Pi 0.85.1 的 `docs/packages.md`、`quickstart.md`、`usage.md`，并读取 `dist/core/package-manager.js` 的 `checkForAvailableUpdates`、`getLocalGitUpdateTarget`、`installGit`、`updateGit`、`ensureGitRef` 实现。宿主升级后重新核对；本次只改本文，未实施分支策略、运行安装/更新/测试或发布。

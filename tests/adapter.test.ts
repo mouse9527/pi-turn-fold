@@ -127,7 +127,7 @@ test('installed Pi 0.85.1 streams parallel tools with a folded projection and ca
     assert.equal(adapter.views[0].turn.running, false);
     const folded = text(mode.chatContainer);
     assert.match(folded, /user-visible/);
-    assert.match(folded, /已完成 · 其他 2/);
+    assert.match(folded, /Process · Other 2/);
     assert.match(folded, /final-answer-visible/);
     assert.match(folded, /intermediate-visible/);
     assert.doesNotMatch(folded, /secret-thinking|final-thinking-hidden|saved-output|native-probe-call/);
@@ -149,7 +149,7 @@ test('installed Pi 0.85.1 streams parallel tools with a folded projection and ca
     const restored = text(mode.chatContainer);
     assert.match(restored, /intermediate-visible/);
     assert.match(restored, /saved-output-a/);
-    assert.doesNotMatch(restored, /已完成 · 其他 2/);
+    assert.doesNotMatch(restored, /Process · Other 2/);
     adapter.dispose(true);
     const second = installAdapter();
     try {
@@ -185,8 +185,8 @@ test('real historical rendering routes late results to their owning turns and re
     const folded = text(mode.chatContainer);
     assert.match(folded, /historical-answer/);
     assert.match(folded, /historical-provider-error/);
-    assert.match(folded, /失败 1/);
-    assert.match(folded, /失败 saved-output-failed/);
+    assert.match(folded, /1 failed/);
+    assert.match(folded, /Failed: saved-output-failed/);
     assert.doesNotMatch(folded, /saved-output-old/);
     assert.deepEqual([counters.renderCall, counters.renderResult], [0, 0]);
     adapter.toggle(0, 0);
@@ -267,7 +267,7 @@ test('off/on is immediate, idempotent and does not stack wrappers or components 
       assert.equal(adapter.setEnabled(false), true);
       assert.equal(adapter.enabled, false);
       assert.match(text(mode.chatContainer), /saved-output-a/);
-      assert.doesNotMatch(text(mode.chatContainer), /已完成 · 其他/);
+      assert.doesNotMatch(text(mode.chatContainer), /Process · Other/);
       assert.equal(view.rows.size, 0);
       const calls = counters.renderCall;
       adapter.setEnabled(false);
@@ -275,7 +275,7 @@ test('off/on is immediate, idempotent and does not stack wrappers or components 
       assert.equal(adapter.toggle(), false, 'fold shortcuts do not operate on the hidden projection');
       assert.equal(adapter.setEnabled(true), true);
       assert.equal(adapter.enabled, true);
-      assert.match(text(mode.chatContainer), /已完成 · 其他 1/);
+      assert.match(text(mode.chatContainer), /Process · Other 1/);
       assert.match(text(mode.chatContainer), /switch-answer/);
       assert.doesNotMatch(text(mode.chatContainer), /saved-output-a/);
       assert.equal(counters.renderCall, calls, 'on must not invoke hidden native tool renderers');
@@ -316,8 +316,8 @@ test('switching during tools and streaming text preserves native execution and l
     await mode.handleEvent({ type: 'tool_execution_end', toolCallId: 'live', result: failed, isError: true });
     await mode.handleEvent({ type: 'message_end', message: failed });
     assert.equal(pending.size, 0);
-    assert.match(text(mode.chatContainer), /失败 1/);
-    assert.match(text(mode.chatContainer), /失败 saved-output-live/);
+    assert.match(text(mode.chatContainer), /1 failed/);
+    assert.match(text(mode.chatContainer), /Failed: saved-output-live/);
     assert.doesNotMatch(text(mode.chatContainer), /saved-output-progress|native-probe-call/);
     assert.equal(counters.renderCall, calls);
     await mode.handleEvent({ type: 'message_start', message: assistant([]) });
@@ -367,7 +367,7 @@ test('native bash elapsed timer is cleared when folding resumes, without stoppin
     assert.equal(mode.pendingTools.get('shell'), native);
     assert.equal(native.executionStarted, true);
     assert.equal(native.isPartial, true);
-    assert.match(text(mode.chatContainer), /当前 执行 never executed/);
+    assert.match(text(mode.chatContainer), /Running: bash never executed/);
     adapter.setEnabled(false);
     const resumed = native.rendererState.interval;
     assert.ok(resumed, 'native display may resume its own timer while off');
@@ -378,7 +378,7 @@ test('native bash elapsed timer is cleared when folding resumes, without stoppin
     assert.equal(native.rendererState.interval, undefined);
     assert.equal(native.isPartial, false);
     assert.equal(mode.pendingTools.size, 0);
-    assert.match(text(mode.chatContainer), /已完成 · 执行 1/);
+    assert.match(text(mode.chatContainer), /Process · Run 1/);
     adapter.setEnabled(false);
     assert.equal(native.rendererState.interval, undefined, 'final native hydration cannot restart it');
     await mode.handleEvent({ type: 'agent_end' });

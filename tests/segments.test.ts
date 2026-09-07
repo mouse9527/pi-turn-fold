@@ -86,6 +86,12 @@ test('successive snapshots of one mixed message append once in saved block order
 test('thinking and textless tool messages share a group; text-only answers create none', () => {
   const turn = new Turn();
   turn.endAssistant(assistant([{ type: 'thinking', thinking: 'private reasoning' }]));
+  const thinkingView = new TurnView(turn, host);
+  assert.equal(groups(turn)[0].summary(false), 'Process · Thinking');
+  assert.equal(groups(turn)[0].summary(true), 'Working · Thinking');
+  thinkingView.toggle();
+  assert.equal(render(thinkingView).trim(), '▾ Process · Thinking\n  ▸ Thinking');
+  thinkingView.dispose();
   turn.endAssistant(assistant([call('a')], 'toolUse'));
   turn.endAssistant(assistant([text('  '), { type: 'thinking', thinking: 'more reasoning' }, call('b')], 'toolUse'));
   turn.endAssistant(assistant([text('visible answer')]));
@@ -126,7 +132,7 @@ test('mouse headers track text offsets, group toggles are independent, fold togg
   const view = new TurnView(twoGroups(), host);
   const clickHeader = (index: number) => {
     const lines = view.render(100).map(stripVTControlCharacters);
-    const headers = lines.flatMap((line, y) => /^[▸▾] 未完成/.test(line) ? [y] : []);
+    const headers = lines.flatMap((line, y) => /^[▸▾] Unfinished/.test(line) ? [y] : []);
     assert.equal(headers.length, 2);
     const middleY = lines.findIndex(line => line.includes('middle paragraph'));
     assert.ok(headers[0] < middleY && middleY < headers[1]);
@@ -265,7 +271,7 @@ test('native spacer leaves exactly one blank line from assistant text to process
     turn.startTool(tool, tool.args);
     for (let repeat = 0; repeat < 10; repeat++) {
       const { lines, headerY } = gap(100);
-      assert.match(lines[headerY + 1], /当前 probe spacing/);
+      assert.match(lines[headerY + 1], /Running: probe spacing/);
       const y = headerY + 1;
       const event: TuiMouseEvent = { type: 'click', button: 'left', x: 1, y, screenX: 1, screenY: y,
         width: 100, height: lines.length, shift: false, ctrl: false, alt: false };
@@ -283,7 +289,7 @@ test('native spacer leaves exactly one blank line from assistant text to process
     turn.result(tool, { content: [], isError: false });
     turn.finish();
     const done = gap(100);
-    assert.doesNotMatch(done.lines.join('\n'), /当前/);
+    assert.doesNotMatch(done.lines.join('\n'), /Running:/);
     assert.equal(done.lines.length, done.headerY + 1);
     view.dispose();
   }

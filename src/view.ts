@@ -65,7 +65,7 @@ export class ItemView extends Container {
       const item = this.item;
       const label = item.kind === 'tool'
         ? toolRow(item)
-        : '思考';
+        : 'Thinking';
       return `  ${this.open ? '▾' : '▸'} ${label}`;
     }, text => this.host.color?.(this.item.kind === 'tool' ? statusColor[this.item.status] : 'muted', text) ?? text), event => {
       if (event.type !== 'click' || event.button !== 'left') return;

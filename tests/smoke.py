@@ -89,10 +89,10 @@ with tempfile.TemporaryDirectory(prefix='pi-turn-fold-smoke-') as directory:
         initial = until('SYNTHETIC-FINAL-ANSWER')
         assert 'PRIVATE-LONG-SCRIPT' not in initial
         assert 'SAVED-TOOL-OUTPUT' not in initial
-        assert '已完成 · 执行 150' in initial
+        assert 'Process · Run 150' in initial
         assert 'SYNTHETIC-MIDDLE-MESSAGE' in initial
         middle = initial.index('SYNTHETIC-MIDDLE-MESSAGE')
-        assert '已完成 · 执行 150' in initial[:middle] and '已完成 · 执行 150' in initial[middle:]
+        assert 'Process · Run 150' in initial[:middle] and 'Process · Run 150' in initial[middle:]
         # Native message-block spacing, measured from emitted rows rather than concatenated text.
         if os.environ.get('FOLD_SMOKE_FULLSCREEN'):
             # Pi fullscreen paints absolute row positions followed by erase-line. This is not
@@ -100,25 +100,25 @@ with tempfile.TemporaryDirectory(prefix='pi-turn-fold-smoke-') as directory:
             paints = re.finditer(rb'\x1b\[(\d+);1H\x1b\[2K(.*?)(?=\x1b\[\d+;\d+H|$)', bytes(output), re.S)
             screen = {int(match[1]): ANSI.sub(b'', match[2]).decode(errors='replace').strip() for match in paints}
             text_row = next(row for row, value in screen.items() if 'SYNTHETIC-MIDDLE-MESSAGE' in value)
-            group_row = min(row for row, value in screen.items() if row > text_row and '已完成 · 执行 150' in value)
+            group_row = min(row for row, value in screen.items() if row > text_row and 'Process · Run 150' in value)
             assert group_row == text_row + 2 and screen[text_row + 1] == '', screen
         else:
             emitted = initial.replace('\r', '').split('\n')
             text_row = next(row for row, value in enumerate(emitted) if 'SYNTHETIC-MIDDLE-MESSAGE' in value)
             assert emitted[text_row + 1].strip() == '', emitted[text_row:text_row + 4]
-            assert '已完成 · 执行 150' in emitted[text_row + 2], emitted[text_row:text_row + 4]
+            assert 'Process · Run 150' in emitted[text_row + 2], emitted[text_row:text_row + 4]
         command('/fold 1')
-        until('✓ 执行 echo PRIVATE-LONG-SCRIPT')
+        until('✓ bash echo PRIVATE-LONG-SCRIPT')
         command('/fold 1 300')
         until('SAVED-TOOL-OUTPUT')
         command('/fold off')
         until('Native transcript restored', seconds=30)
         command('/fold on')
         enabled = until('Folding enabled.', seconds=30)
-        assert '已完成 · 执行 150' in enabled and 'SYNTHETIC-MIDDLE-MESSAGE' in enabled
+        assert 'Process · Run 150' in enabled and 'SYNTHETIC-MIDDLE-MESSAGE' in enabled
         command('/reload')
         reloaded = until('Reloaded keybindings', seconds=30)
-        assert '已完成 · 执行 150' in reloaded and 'SYNTHETIC-MIDDLE-MESSAGE' in reloaded
+        assert 'Process · Run 150' in reloaded and 'SYNTHETIC-MIDDLE-MESSAGE' in reloaded
         command('/quit')
         deadline = time.monotonic() + 10
         while process.poll() is None and time.monotonic() < deadline:

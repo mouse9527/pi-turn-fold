@@ -21,12 +21,12 @@ test('fixed categories count calls, preserve builtin actions and unknown names, 
     turn.result(tool, success);
   }
   const group = turn.groupOf.get(turn.tools.get('0')!)!;
-  assert.equal(group.summary(false), '已完成 · 读取 3 · 搜索 3 · 执行 2 · 修改 2 · 其他 1');
+  assert.equal(group.summary(false), 'Process · Read 3 · Search 3 · Run 2 · Edit 2 · Other 1');
   assert.equal(group.activity(turn.running), '');
   assert.match(toolRow(turn.tools.get('10')!), /✓ mcp__read same.ts/);
-  assert.match(toolRow(turn.tools.get('6')!), /✓ 写入 same.ts/);
-  assert.match(toolRow(turn.tools.get('8')!), /✓ 查找 same.ts/);
-  assert.match(toolRow(turn.tools.get('9')!), /✓ 列出 same.ts/);
+  assert.match(toolRow(turn.tools.get('6')!), /✓ write same.ts/);
+  assert.match(toolRow(turn.tools.get('8')!), /✓ find same.ts/);
+  assert.match(toolRow(turn.tools.get('9')!), /✓ ls same.ts/);
 });
 
 test('pending, parallel starts, out-of-order and corrected results maintain current operation and failure maps', () => {
@@ -36,14 +36,15 @@ test('pending, parallel starts, out-of-order and corrected results maintain curr
   const b = turn.tool('b', 'bash', { command: 'npm test' });
   const group = turn.groupOf.get(a)!;
   assert.equal(group.pending.size, 2);
-  assert.doesNotMatch(group.summary(false), /已完成/);
+  assert.equal(group.summary(false), 'Unfinished · Read 1 · Run 1 · 2 unfinished');
   turn.startTool(a, a.args);
   turn.startTool(b, b.args);
-  assert.equal(group.activity(turn.running), '当前 读取 a.ts');
+  assert.equal(group.summary(true), 'Working · Read 1 · Run 1 · 2 unfinished');
+  assert.equal(group.activity(turn.running), 'Running: read a.ts');
   turn.result(b, success, true);
-  assert.equal(group.activity(turn.running), '当前 读取 a.ts', 'partial updates do not reorder starts');
+  assert.equal(group.activity(turn.running), 'Running: read a.ts', 'partial updates do not reorder starts');
   turn.result(a, success);
-  assert.equal(group.activity(turn.running), '当前 执行 npm test');
+  assert.equal(group.activity(turn.running), 'Running: bash npm test');
   const failure = { content: [{ type: 'text', text: 'very detailed output\nCommand exited with code 1' }], isError: true };
   turn.result(b, failure);
   turn.result(b, failure);
@@ -51,18 +52,18 @@ test('pending, parallel starts, out-of-order and corrected results maintain curr
   assert.equal(group.failures.size, 1);
   assert.equal(group.runningTools.size, 0);
   assert.equal(group.pending.size, 0);
-  assert.equal(group.activity(turn.running), '失败 退出码 1 · 执行 npm test');
-  assert.match(toolRow(b), /✗ 执行 npm test · 退出码 1/);
+  assert.equal(group.activity(turn.running), 'Failed: exit code 1 · bash npm test');
+  assert.match(toolRow(b), /✗ bash npm test · exit code 1/);
   turn.result(b, success);
   assert.equal(group.failures.size, 0);
   assert.equal(group.activity(turn.running), '');
-  assert.equal(group.summary(false), '已完成 · 读取 1 · 执行 1');
+  assert.equal(group.summary(false), 'Process · Read 1 · Run 1');
   turn.startTool(b, b.args);
   assert.equal(group.completed, 1);
   turn.finish();
-  assert.doesNotMatch(group.summary(false), /已完成/);
+  assert.equal(group.summary(false), 'Unfinished · Read 1 · Run 1 · 1 unfinished');
   assert.equal(group.runningTools.size, 1);
-  assert.equal(group.activity(turn.running), '未完成 执行 npm test');
+  assert.equal(group.activity(turn.running), 'Unfinished: bash npm test');
   assert.equal(b.status, 'running', 'finish does not invent a result or failure');
   assert.equal(b.result?.isError, false);
 });
@@ -76,27 +77,48 @@ test('failure identity follows its bounded reason, with parallel and stopped act
   turn.result(failed, { content: [], isError: true, details: { exitCode: 1 } });
   const group = turn.groupOf.get(failed)!;
   const activity = group.activity(turn.running);
-  assert.ok(activity.startsWith('失败 退出码 1 · 执行 npm test '));
-  assert.ok(activity.endsWith(' · 当前 读取 src/auth.ts'));
+  assert.ok(activity.startsWith('Failed: exit code 1 · bash npm test '));
+  assert.ok(activity.endsWith(' · Running: read src/auth.ts'));
   assert.ok(activity.length < 230, 'long target is bounded before layout');
   const view = new TurnView(turn, host);
   let lines = view.render(35).map(stripVTControlCharacters);
   assert.equal(lines.length, 3, 'one spacer, one summary and exactly one status line');
-  assert.match(lines[2], /^  失败 退出码 1 · 执行 npm test/);
+  assert.equal(lines[2], '  Failed: exit code 1 · bash npm...');
   turn.finish();
-  assert.ok(group.activity(turn.running).endsWith(' · 未完成 读取 src/auth.ts'));
+  assert.ok(group.activity(turn.running).endsWith(' · Unfinished: read src/auth.ts'));
   lines = view.render(240).map(stripVTControlCharacters);
   assert.equal(lines.length, 3);
-  assert.match(lines[2], /未完成 读取 src\/auth.ts/);
-  assert.doesNotMatch(lines.join('\n'), /当前/);
+  assert.match(lines[2], /Unfinished: read src\/auth.ts/);
+  assert.doesNotMatch(lines.join('\n'), /Running:/);
   assert.equal(current.status, 'running');
   assert.equal(group.failed, 1);
   assert.equal(group.completed, 0);
   turn.result(failed, success);
   const unknown = turn.tool('unknown', 'mcp__deploy', { query: 'staging' });
   turn.result(unknown, { content: [], isError: true, details: { error: 'permission denied' } });
-  assert.equal(group.activity(turn.running), '失败 permission denied · mcp__deploy staging · 未完成 读取 src/auth.ts');
+  assert.equal(group.activity(turn.running), 'Failed: permission denied · mcp__deploy staging · Unfinished: read src/auth.ts');
   view.dispose();
+});
+
+test('generated failure and truncation hints are English while saved excerpts and custom names stay intact', () => {
+  const turn = new Turn();
+  const tool = turn.tool('shell', 'powershell', { command: 'npm test' });
+  for (const [text, reason] of [
+    ['Command timed out after 2.5 seconds', 'timed out after 2.5 seconds'],
+    ['Command aborted', 'cancelled'],
+    ['', 'tool execution failed'],
+    ['失败原因', '失败原因'],
+  ]) {
+    const result = { content: [{ type: 'text', text }], isError: true, details: { truncated: true } };
+    const saved = structuredClone(result);
+    turn.result(tool, result);
+    assert.equal(toolRow(tool), `✗ powershell npm test · ${reason} · output truncated`);
+    assert.equal(turn.groupOf.get(tool)!.activity(false), `Failed: ${reason} · powershell npm test`);
+    assert.equal(turn.groupOf.get(tool)!.summary(false), 'Failed · Run 1 · 1 failed · 1 truncated');
+    assert.deepEqual(result, saved);
+  }
+  const custom = turn.tool('custom', '自定义工具', { query: '原始输入' });
+  assert.equal(toolRow(custom), '○ 自定义工具 原始输入');
 });
 
 test('only successful saved numbered edit diffs yield counts, repeated results reuse stats', () => {
@@ -105,7 +127,7 @@ test('only successful saved numbered edit diffs yield counts, repeated results r
   const saved = { ...success, details: { diff: '  1 context\n- 2 old\n+ 2 new\n+ 3 extra\n    ...' } };
   turn.result(edit, saved);
   assert.deepEqual(edit.diffStats, { added: 2, removed: 1 });
-  assert.match(toolRow(edit), /✓ 修改 auth.ts \+2 −1/);
+  assert.match(toolRow(edit), /✓ edit auth.ts \+2 −1/);
   const stats = edit.diffStats;
   turn.result(edit, structuredClone(saved));
   assert.equal(edit.diffStats, stats);
@@ -130,7 +152,7 @@ test('failure extraction bounds both text and block work and strips untrusted AN
   const inaccessible = { type: 'text', get text(): string { throw new Error('scanned old block'); } };
   turn.result(tool, { content: [inaccessible, ...Array.from({ length: 7 }, () => ({ type: 'text', text: ' '.repeat(1_000_000) })),
     { type: 'text', text: 'x'.repeat(1_000_000) + '\n\x1b[31mCommand exited with code 2\x1b[0m' }], isError: true });
-  assert.equal(tool.errorSummary, '退出码 2');
+  assert.equal(tool.errorSummary, 'exit code 2');
   assert.ok(trim.mock.calls.every(call => String(call.this).length <= 1024));
   turn.result(tool, { content: [], isError: true, details: { error: '\x1b[2J失败原因\n' + 'x'.repeat(1_000_000) } });
   assert.equal(tool.errorSummary, '失败原因');
@@ -147,7 +169,7 @@ test('summary and unopened rows never scan saved outputs or diffs during render'
   const view = new TurnView(turn, host);
   view.render(80);
   view.toggle();
-  for (let i = 0; i < 5; i++) assert.match(view.render(80).join('\n'), /修改 cached.ts \+1 −1/);
+  for (let i = 0; i < 5; i++) assert.match(view.render(80).join('\n'), /edit cached.ts \+1 −1/);
 });
 
 test('trusted theme survives sanitizing, ANSI/CJK rows clip at narrow cell widths, activity clicks keep offsets', () => {
@@ -165,13 +187,13 @@ test('trusted theme survives sanitizing, ANSI/CJK rows clip at narrow cell width
   } });
   let lines = view.render(80);
   assert.match(lines.join('\n'), /\x1b\[33m/);
-  const y = lines.findIndex(line => line.includes('当前'));
+  const y = lines.findIndex(line => line.includes('Running:'));
   const click = (y: number) => ({ type: 'click' as const, button: 'left' as const, x: 1, y, screenX: 1, screenY: y,
     width: 80, height: lines.length, shift: false, ctrl: false, alt: false });
   assert.ok(view.handleMouse(click(y))?.handled, 'second summary line shares disclosure region');
   lines = view.render(80);
   assert.equal(view.rows.size, 2);
-  const rowY = lines.findIndex(line => stripVTControlCharacters(line).includes('▸ … 执行 npm test'));
+  const rowY = lines.findIndex(line => stripVTControlCharacters(line).includes('▸ … bash npm test'));
   assert.equal(rowY, y + 2);
   assert.ok(view.handleMouse(click(rowY))?.handled);
   assert.equal(view.rows.get(b)?.open, true);
@@ -185,8 +207,8 @@ test('trusted theme survives sanitizing, ANSI/CJK rows clip at narrow cell width
   assert.ok(colors.includes('warning') && colors.includes('success') && colors.includes('error'));
   turn.result(b, success);
   lines = view.render(80);
-  assert.ok(!lines.some(line => line.includes('当前') || line.includes('失败')));
-  const newRowY = lines.findIndex(line => stripVTControlCharacters(line).includes('▸ ✓ 执行 npm test'));
+  assert.ok(!lines.some(line => line.includes('Running:') || line.includes('Failed')));
+  const newRowY = lines.findIndex(line => stripVTControlCharacters(line).includes('▸ ✓ bash npm test'));
   assert.equal(newRowY, rowY - 1);
   assert.ok(view.handleMouse(click(newRowY))?.handled);
   assert.equal(view.rows.get(b)?.open, true);

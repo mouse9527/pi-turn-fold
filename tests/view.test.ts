@@ -31,12 +31,12 @@ test('closed turns build zero native tool renderers; mouse expands exactly the c
   assert.equal(calls, 0);
   assert.equal(view.rows.size, 0);
   assert.doesNotMatch(lines.join('\n'), /hidden output|python3/);
-  const summaryY = lines.findIndex(line => line.includes('执行 1000'));
+  const summaryY = lines.findIndex(line => line.includes('Run 1000'));
   assert.ok(view.handleMouse(click(summaryY, lines.length))?.handled);
   lines = view.render(80);
   assert.equal(calls, 0);
   assert.equal(view.rows.size, 1000);
-  const toolY = lines.findIndex(line => line.includes('✓ 执行 python3'));
+  const toolY = lines.findIndex(line => line.includes('✓ bash python3'));
   assert.ok(view.handleMouse(click(toolY, lines.length))?.handled);
   lines = view.render(80);
   assert.equal(calls, 1);
@@ -90,8 +90,8 @@ test('inline dispatch reaches saved edit and nested native details without losin
     assert.ok(y >= 0, `missing ${label}: ${rendered.join('\n')}`);
     return view.handleMouse({ ...click(y, rendered.length, width), x: 10, screenX: 10, type });
   };
-  assert.ok(dispatch('当前 custom-agent')?.handled, 'whole activity line opens the group');
-  assert.ok(dispatch('✓ 修改')?.handled);
+  assert.ok(dispatch('Running: custom-agent')?.handled, 'whole activity line opens the group');
+  assert.ok(dispatch('✓ edit')?.handled);
   assert.match(lines().join('\n'), /Arguments[\s\S]*oldText[\s\S]*-1 before[\s\S]*\+1 after/);
   assert.equal(view.rows.get(edit)?.open, true);
   assert.ok(dispatch('… custom-agent')?.handled);
@@ -109,7 +109,7 @@ test('inline dispatch reaches saved edit and nested native details without losin
     assert.equal(view.open, true);
     assert.equal(dispatch('saved child invocation', width, 'wheel'), undefined);
     assert.equal(dispatch('saved child invocation', width, 'drag'), undefined);
-    assert.equal(dispatch('当前 custom-agent', width, 'wheel'), undefined);
+    assert.equal(dispatch('Running: custom-agent', width, 'wheel'), undefined);
     assert.ok(dispatch('▾ saved child invocation', width)?.handled);
     assert.equal(nested?.open, false);
     assert.ok(dispatch('▸ saved child invocation', width)?.handled);
@@ -118,15 +118,15 @@ test('inline dispatch reaches saved edit and nested native details without losin
   assert.match(lines().join('\n'), /final nested result/);
   assert.equal(nested, instance);
   assert.equal(nested?.open, true);
-  assert.doesNotMatch(lines().join('\n'), /当前/);
+  assert.doesNotMatch(lines().join('\n'), /Running:/);
   assert.ok(dispatch('✓ custom-agent')?.handled, 'item collapses after the activity line disappears');
   assert.equal(view.rows.get(custom)?.open, false);
   for (let i = 0; i < 3; i++) {
-    assert.ok(dispatch('▾ 已完成')?.handled);
+    assert.ok(dispatch('▾ Process')?.handled);
     assert.equal(view.open, false);
-    assert.ok(dispatch('▸ 已完成')?.handled);
+    assert.ok(dispatch('▸ Process')?.handled);
     assert.equal(view.open, true);
-    assert.ok(dispatch('✓ 修改')?.handled);
+    assert.ok(dispatch('✓ edit')?.handled);
     assert.match(lines().join('\n'), /-1 before[\s\S]*\+1 after/);
   }
   assert.equal(executions, 0);

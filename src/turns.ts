@@ -23,7 +23,7 @@ export class ProcessGroup {
   truncated = 0;
   revision = 0;
 
-  readonly categories: Record<Category, number> = { 读取: 0, 搜索: 0, 执行: 0, 修改: 0, 其他: 0 };
+  readonly categories: Record<Category, number> = { Read: 0, Search: 0, Run: 0, Edit: 0, Other: 0 };
   readonly pending = new Map<string, Tool>();
   readonly runningTools = new Map<string, Tool>();
   readonly failures = new Map<string, Tool>();
@@ -44,21 +44,21 @@ export class ProcessGroup {
 
   summary(running: boolean) {
     const unresolved = this.pending.size + this.runningTools.size;
-    const state = { pending: '未完成', running: '进行中', done: '已完成', error: '失败' }[this.status(running)];
+    const state = { pending: 'Unfinished', running: 'Working', done: 'Process', error: 'Failed' }[this.status(running)];
     return state + categories.filter(category => this.categories[category])
       .map(category => ` · ${category} ${this.categories[category]}`).join('') +
-      (!this.count ? ' · 思考' : '') +
-      (unresolved ? ` · 未完成 ${unresolved}` : '') +
-      (this.failed ? ` · 失败 ${this.failed}` : '') +
-      (this.truncated ? ` · 输出已截断 ${this.truncated}` : '');
+      (!this.count ? ' · Thinking' : '') +
+      (unresolved ? ` · ${unresolved} unfinished` : '') +
+      (this.failed ? ` · ${this.failed} failed` : '') +
+      (this.truncated ? ` · ${this.truncated} truncated` : '');
   }
 
   activity(running: boolean) {
     const current = this.runningTools.values().next().value as Tool | undefined;
     const failure = this.failures.values().next().value as Tool | undefined;
     // Put the failure first so a long parallel command cannot clip away its reason.
-    return (failure ? `失败 ${failure.errorSummary ?? '工具执行失败'} · ${toolAction(failure)} ${toolTarget(failure)}`.trimEnd() : '') +
-      (current ? `${failure ? ' · ' : ''}${running ? '当前' : '未完成'} ${toolAction(current)} ${toolTarget(current)}`.trimEnd() : '');
+    return (failure ? `Failed: ${failure.errorSummary ?? 'tool execution failed'} · ${toolAction(failure)} ${toolTarget(failure)}`.trimEnd() : '') +
+      (current ? `${failure ? ' · ' : ''}${running ? 'Running' : 'Unfinished'}: ${toolAction(current)} ${toolTarget(current)}`.trimEnd() : '');
   }
 }
 
@@ -196,12 +196,12 @@ export class Turn {
 
   summary() {
     const pending = this.tools.size - this.completed - this.failed;
-    const state = this.failed ? '失败' : this.running ? '进行中' : pending ? '未完成' : '已完成';
-    return `${state} · 工具 ${this.tools.size}` +
-      (pending ? ` · 未完成 ${pending}` : '') +
-      (this.failed ? ` · 失败 ${this.failed}` : '') +
-      (this.truncated ? ` · 输出已截断 ${this.truncated}` : '') +
-      (this.warnings.length ? ` · 警告 ${this.warnings.length}` : '');
+    const state = this.failed ? 'Failed' : this.running ? 'Working' : pending ? 'Unfinished' : 'Process';
+    return `${state} · Tools ${this.tools.size}` +
+      (pending ? ` · ${pending} unfinished` : '') +
+      (this.failed ? ` · ${this.failed} failed` : '') +
+      (this.truncated ? ` · ${this.truncated} truncated` : '') +
+      (this.warnings.length ? ` · Warnings ${this.warnings.length}` : '');
   }
 }
 

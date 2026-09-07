@@ -7,11 +7,11 @@ Assistant text streams normally and stays visible. Consecutive tool calls and th
 ```text
 Your question
 
-▸ 已完成 · 读取 2 · 执行 1                # a, b, c
+▸ Process · Read 2 · Run 1                # a, b, c
 
 Found the issue. Next I'll update the config.   # streamed immediately
 
-▸ 已完成 · 执行 1 · 修改 2                # d, e, f
+▸ Process · Run 1 · Edit 2                # d, e, f
 
 Fixed; tests passed.                    # also streamed immediately
 ```
@@ -19,22 +19,60 @@ Fixed; tests passed.                    # also streamed immediately
 Expand one process group, then an individual item:
 
 ```text
-▾ 已完成 · 读取 1 · 执行 1 · 修改 1
-  ▸ 思考
-  ▸ ✓ 读取 src/auth.ts
-  ▸ ✓ 执行 python3
-  ▾ ✓ 修改 src/auth.ts +12 −4
+▾ Process · Read 1 · Run 1 · Edit 1
+  ▸ Thinking
+  ▸ ✓ read src/auth.ts
+  ▸ ✓ bash python3
+  ▾ ✓ edit src/auth.ts +12 −4
     Arguments …
     [native saved edit diff]
 ```
 
-Labels use Chinese actions and call counts (not distinct-file counts). Known tools are categorized by their registered name, never by guessing shell commands; custom/MCP names remain visible in item rows and count under `其他`. Status glyphs (`○`, `…`, `✓`, `✗`) remain meaningful without color; colors come from Pi's current theme.
+Labels use English categories and recognizable lowercase tool actions, with call counts (not distinct-file counts). Known tools are categorized by their registered name, never by guessing shell commands; custom/MCP names remain visible in item rows and count under `Other`. Status glyphs (`○`, `…`, `✓`, `✗`) remain meaningful without color; colors come from Pi's current theme.
 
-Running groups add one `当前` command/path line; after the run stops, outstanding calls use `未完成` instead. Failed groups show a failure count and a short reason followed by the failed action/name and bounded target (for example `失败 退出码 1 · 执行 npm test`). A parallel current/outstanding call shares that same status line. The reason comes first so long targets cannot hide it; pending/unresolved calls are never labeled completed. These compact hints do not replace saved details. Only successful `edit` results with a valid saved, numbered Pi diff get `+added −removed` statistics.
+Headers use `Process` for completed groups, `Working` for active groups, `Unfinished` for stopped unresolved groups, and `Failed` for failed groups. Running groups add one `Running:` command/path line; after the run stops, outstanding calls use `Unfinished:` instead. Failed groups show a failure count and a short reason followed by the failed action/name and bounded target (for example `Failed: exit code 1 · bash npm test`). A parallel current/outstanding call shares that same status line. The reason comes first so long targets cannot hide it; pending/unresolved calls are never labeled completed. These compact hints do not replace saved details. Only successful `edit` results with a valid saved, numbered Pi diff get `+added −removed` statistics.
 
 Groups expand independently, with Pi's standard outer message spacing. Click the group header or its activity line to show items, then an item row to inspect saved arguments, output and edit diffs inline. Open tool/native detail components are retained across streamed results; nested controls provided by a registered native renderer keep their own state. The plugin does not infer arbitrary Agent/MCP child executions from output text or invent a universal nested-call schema. Later tool calls never pull earlier assistant text back into a fold. Plain-text answers without tools or thinking create no empty process row. This is **not** a final-answer-only Focus view.
 
 Failures, aborted responses, truncation and unfinished calls are indicated outside the collapsed details. Pi's extension dialogs, notices, editor and execution behavior remain native.
+
+## Install from GitHub
+
+Requires **Pi 0.85.1**. Disable conflicting transcript/tool renderers before loading; review the source because extensions run with full system access.
+
+### Published release (version-locked)
+
+**No tags or releases are published yet.** Once available, choose a tag from [GitHub Releases](https://github.com/mouse9527/pi-turn-fold/releases) and replace `<published-tag>` below; this is a template, not an existing release:
+
+```bash
+pi install 'git:github.com/mouse9527/pi-turn-fold@<published-tag>'
+```
+
+Pi fetches the tagged source and loads TypeScript through its extension loader. No manual clone, local compilation, `npm run build`, `tsc`, or npm account is needed. Pi may run `npm install` automatically for package dependencies. No release ZIP download or compiled artifact is required.
+
+### Latest development and native updates
+
+The currently available unpinned source tracks **development on main**, not a published stable release:
+
+```bash
+pi install git:github.com/mouse9527/pi-turn-fold
+# Update just this package, without updating the Pi host:
+pi update --extension git:github.com/mouse9527/pi-turn-fold
+# Or update all extension packages, without updating the Pi host:
+pi update --extensions
+```
+
+Tagged installs remain version-locked: install the source again with a newer published tag to upgrade. `@latest` is not a magic GitHub Latest Release alias. A future policy of validated releases on `main` and development on `dev` is not yet in effect; unpinned does not currently mean latest stable.
+
+Restart Pi after installation or changing renderer packages; normal startup loads the registered extension in your existing terminal mode. After a code-only update, restart or use `/reload`. Installation does not disable conflicting renderers automatically.
+
+To uninstall:
+
+```bash
+pi remove git:github.com/mouse9527/pi-turn-fold
+```
+
+**Migrating from a local checkout:** local and Git sources have different package identities and can load twice. Remove the local package registration first (`pi remove /absolute/path/to/pi-turn-fold`, using its registered path and `-l` if project-local), or remove its direct extension registration; do not delete the source checkout. Stop passing the old local `-e` path before starting the Git-installed copy.
 
 ## Try without changing your configuration
 
@@ -42,20 +80,12 @@ Failures, aborted responses, truncation and unfinished calls are indicated outsi
 
 ```bash
 # After cloning this repository; no npm install is needed to load the extension in Pi.
-pi --no-extensions -e ./extensions/index.ts --tui-mode fullscreen
+pi --no-extensions -e ./extensions/index.ts
 ```
 
 To test a long session, first copy its JSONL file into a **separate temporary directory**, then pass `--session /path/to/copy.jsonl`. Do not use the original file for experimentation. No session data is included in this repository.
 
 `--no-extensions` disables discovery of your other extensions for that invocation only. Other global settings still apply. The automated smoke test below uses a completely separate agent directory and synthetic history.
-
-Once you have tested it, optional persistent installation:
-
-```bash
-pi install git:github.com/mouse9527/pi-turn-fold
-```
-
-Restart Pi after changing renderer packages. Installing the package does **not** automatically disable conflicting packages.
 
 ## Controls
 
