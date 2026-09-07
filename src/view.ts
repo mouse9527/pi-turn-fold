@@ -1,7 +1,7 @@
 import { stripVTControlCharacters } from 'node:util';
 import { AssistantMessageComponent, ToolExecutionComponent, getMarkdownTheme } from '@earendil-works/pi-coding-agent';
 import { Container, MouseRegion, Text, truncateToWidth, type Component, type TUI } from '@earendil-works/pi-tui';
-import { Turn, toolLabel, type Item, type Tool } from './turns.ts';
+import { Turn, ProcessGroup, toolLabel, type Item, type Tool, type TextSegment } from './turns.ts';
 
 export type ViewHost = {
   ui: TUI;
@@ -55,7 +55,7 @@ export class ItemView extends Container {
       const item = this.item;
       const label = item.kind === 'tool'
         ? `${toolLabel(item)} · ${item.status}${item.truncated ? ' · truncated' : ''}`
-        : 'Assistant / thinking';
+        : 'Thinking';
       return `  ${this.open ? '▾' : '▸'} ${label}`;
     }), event => {
       if (event.type !== 'click' || event.button !== 'left') return;
@@ -92,9 +92,95 @@ export class ItemView extends Container {
       this.rebuild();
       this.detail = this.item.kind === 'tool'
         ? this.toolDetail(this.item)
-        : new AssistantMessageComponent(this.item.message, false, getMarkdownTheme(), 'Thinking...', 1, this.host.markdownTransformers);
+        : new AssistantMessageComponent({ ...this.item.message, stopReason: 'stop',
+          content: this.item.message.content.filter(block => block.type === 'thinking') },
+          false, getMarkdownTheme(), 'Thinking...', 1, this.host.markdownTransformers);
       this.addChild(this.detail);
       this.seen = this.item.revision;
+    }
+    return super.render(width);
+  }
+}
+
+/** One consecutive process run, bounded by visible assistant text. */
+class ProcessView extends Container {
+  group: ProcessGroup;
+  turn: Turn;
+  host: ViewHost;
+  open = false;
+  rows = new Map<Item, ItemView>();
+  private seen = -1;
+
+  constructor(group: ProcessGroup, turn: Turn, host: ViewHost) {
+    super();
+    this.group = group;
+    this.turn = turn;
+    this.host = host;
+  }
+
+  toggle() {
+    this.open = !this.open;
+    if (!this.open) this.release();
+    this.seen = -1;
+    this.host.ui.requestRender(true);
+  }
+
+  release() {
+    for (const row of this.rows.values()) row.release();
+    this.rows.clear();
+    this.clear();
+  }
+
+  toggleItem(item: Item) {
+    if (!this.open) this.toggle();
+    this.sync();
+    this.rows.get(item)!.toggle();
+  }
+
+  private sync() {
+    if (this.seen === this.group.revision) return;
+    this.seen = this.group.revision;
+    this.clear();
+    this.addChild(new Text('', 0, 0));
+    this.addChild(new MouseRegion(line(() => `${this.open ? '▾' : '▸'} ${this.group.summary(this.turn.running)}`), event => {
+      if (event.type !== 'click' || event.button !== 'left') return;
+      this.toggle();
+      return { handled: true };
+    }));
+    if (this.open) {
+      // ponytail: expanded groups walk their rows; virtualize only if measured latency warrants it.
+      for (const item of this.group.items) {
+        let row = this.rows.get(item);
+        if (!row) { row = new ItemView(item, this.host); this.rows.set(item, row); }
+        this.addChild(row);
+      }
+    }
+  }
+
+  override render(width: number): string[] {
+    this.sync();
+    return super.render(width);
+  }
+}
+
+/** Visible text is streamed in place, never removed when a later tool starts. */
+class AssistantTextView extends Container {
+  segment: TextSegment;
+  private seen = -1;
+  private native: AssistantMessageComponent;
+
+  constructor(segment: TextSegment, host: ViewHost) {
+    super();
+    this.segment = segment;
+    this.native = new AssistantMessageComponent(undefined, true, getMarkdownTheme(), '', 1, host.markdownTransformers);
+    this.addChild(this.native);
+  }
+
+  override render(width: number): string[] {
+    if (this.seen !== this.segment.revision) {
+      this.native.updateContent({ ...this.segment.assistant.message, stopReason: 'stop',
+        content: [{ type: 'text', text: this.segment.text }] }, this.segment.streaming);
+      this.seen = this.segment.revision;
     }
     return super.render(width);
   }
@@ -103,31 +189,43 @@ export class ItemView extends Container {
 export class TurnView extends Container {
   turn: Turn;
   host: ViewHost;
-  open = false;
-  rows = new Map<Item, ItemView>();
-  private seen = -1;
-  private answer?: Component;
-  private answerItem?: Item;
-  private answerRevision = -1;
+  groups = new Map<ProcessGroup, ProcessView>();
+  private content = new Container();
+  private alerts = new Container();
+  private nextSegment = 0;
+  private nextWarning = 0;
 
   constructor(turn: Turn, host: ViewHost) {
     super();
     this.turn = turn;
     this.host = host;
+    this.addChild(this.content);
+    this.addChild(this.alerts);
   }
 
+  get open() { return [...this.groups.values()].some(group => group.open); }
+  get rows() { return new Map([...this.groups.values()].flatMap(group => [...group.rows])); }
+
   toggle() {
-    this.open = !this.open;
-    if (!this.open) this.releaseRows();
-    this.seen = -1;
-    this.host.ui.requestRender(true);
+    this.sync();
+    const open = !this.open;
+    for (const group of this.groups.values()) if (group.open !== open) group.toggle();
+  }
+
+  toggleGroup(index: number) {
+    this.sync();
+    const group = [...this.groups.values()][index];
+    if (!group) return false;
+    group.toggle();
+    return true;
   }
 
   toggleItem(item: Item | undefined) {
     if (!item) return false;
-    if (!this.open) this.toggle();
     this.sync();
-    this.rows.get(item)!.toggle();
+    const group = this.turn.groupOf.get(item);
+    if (!group) return false; // Text-only assistant messages are already visible.
+    this.groups.get(group)!.toggleItem(item);
     return true;
   }
 
@@ -135,52 +233,26 @@ export class TurnView extends Container {
     return this.toggleItem([...this.turn.tools.values()][index]);
   }
 
-  private releaseRows() {
-    for (const row of this.rows.values()) row.release();
-    this.rows.clear();
-  }
-
   dispose() {
-    this.releaseRows();
+    for (const group of this.groups.values()) group.release();
+    this.groups.clear();
+    this.content.clear();
+    this.alerts.clear();
     this.clear();
-    this.answer = undefined;
-    this.answerItem = undefined;
   }
 
   private sync() {
-    if (this.seen === this.turn.revision) return;
-    this.seen = this.turn.revision;
-    this.clear();
-    this.addChild(new Text('', 0, 0));
-    this.addChild(new MouseRegion(line(() => `${this.open ? '▾' : '▸'} ${this.turn.summary()}`), event => {
-      if (event.type !== 'click' || event.button !== 'left') return;
-      this.toggle();
-      return { handled: true };
-    }));
-    // Errors remain visible even when no final answer exists. Details are never discarded.
-    for (const warning of this.turn.warnings) this.addChild(new Text(`⚠ ${stripVTControlCharacters(warning)}`, 1, 0));
-    if (this.open) {
-      // ponytail: expanded turns walk their rows; virtualize only if measured open-view latency warrants it.
-      for (const item of this.turn.items) {
-        let row = this.rows.get(item);
-        if (!row) { row = new ItemView(item, this.host); this.rows.set(item, row); }
-        this.addChild(row);
-      }
+    // Append only newly discovered segments. Never re-partition history per token/result.
+    while (this.nextSegment < this.turn.segments.length) {
+      const segment = this.turn.segments[this.nextSegment++];
+      if (segment.kind === 'process') {
+        const group = new ProcessView(segment, this.turn, this.host);
+        this.groups.set(segment, group);
+        this.content.addChild(group);
+      } else this.content.addChild(new AssistantTextView(segment, this.host));
     }
-    const final = !this.turn.running ? this.turn.final : undefined;
-    if (final) {
-      if (this.answerItem !== final || this.answerRevision !== final.revision) {
-        // Thinking and diagnostics belong to process/alert rows, not the final answer.
-        const message = { ...final.message, stopReason: 'stop' as const,
-          content: final.message.content.filter(block => block.type === 'text') };
-        this.answer = new AssistantMessageComponent(message, true, getMarkdownTheme(), '', 1, this.host.markdownTransformers);
-        this.answerItem = final;
-        this.answerRevision = final.revision;
-      }
-      this.addChild(this.answer!);
-    } else {
-      this.answer = undefined;
-      this.answerItem = undefined;
+    while (this.nextWarning < this.turn.warnings.length) {
+      this.alerts.addChild(new Text(`⚠ ${stripVTControlCharacters(this.turn.warnings[this.nextWarning++])}`, 1, 0));
     }
   }
 

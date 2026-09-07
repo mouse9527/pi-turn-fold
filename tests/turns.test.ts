@@ -25,7 +25,7 @@ test('parallel tools reconcile execution and persisted results without double co
   assert.equal(JSON.stringify(message), before);
 });
 
-test('intermediate response becomes process; last answer and terminal failures survive', () => {
+test('assistant message records and terminal failures survive later messages', () => {
   const turn = new Turn();
   turn.endAssistant(assistant([{ type: 'text', text: 'intermediate' }]));
   turn.startAssistant(assistant([], 'pending'));

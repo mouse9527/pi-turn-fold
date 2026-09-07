@@ -26,11 +26,17 @@ Both `render` and `handleMouse` delegate to that same tree, so mouse offsets use
 
 Native custom entries occasionally insert directly into `chatContainer.children`. The adapter reconciles that rare insertion path explicitly; ordinary streaming events do not rescan the canonical tree.
 
-A “turn” here begins at a delivered **user message**, not every model `turn_start`. Tools are indexed by ID so interleaved parallel results and late results remain associated with their originating user turn. Historical result reconciliation is a one-time linear pass over Pi's supplied display items. The adapter does not rebuild a full pre-compaction branch on its own.
+A “turn” here begins at a delivered **user message**, not every model `turn_start`. It owns an append-only sequence of **process groups and visible text segments**. Tools are indexed by ID, with a fixed owning group, so interleaved parallel results and late results update the right group and user turn. Historical result reconciliation is a one-time linear pass over Pi's supplied display items. The adapter does not rebuild a full pre-compaction branch on its own.
 
-## Final answers and failures
+Only the current assistant message's content blocks are inspected during streaming. A newly visible text block seals the preceding process group; subsequent tools/thinking begin another group. Repeated snapshots update existing text/tool records, rather than repartitioning the conversation. Textless assistant messages do not break a group. Block positions follow Pi's append-oriented streaming message representation. Empty/whitespace text does not create an empty separator.
 
-While an agent run is active, text stays inside the process. At run end, the latest assistant message without tool calls contributes its text-only final answer. Prior assistant messages and thinking remain individually inspectable.
+Each group owns its own expansion state. Opening one tool opens only its containing group, and a newly appended group starts closed without resetting already open groups. `/fold` keeps the user-turn-level convenience toggle; `/fold groups` selects a single group.
+
+## Live text and failures
+
+All visible assistant text streams immediately in content-block order, whether it is an intermediate explanation or a final answer. Text is never moved or retracted when a later tool starts. Each text segment owns a native text-only assistant component; updates carry the correct streaming flag to Markdown transformers. Later tool events do not rebuild or re-transform completed text. Thinking stays inside the process inspector; opening thinking does not duplicate the already-visible assistant text.
+
+No final-answer classifier or end-of-run visibility gate is needed. A text-only answer creates no empty process group. Errors and tool details remain separate from these text-only components.
 
 Assistant error, abort and length stops create visible alert text, including when there is no final answer. An error/abort also marks outstanding tool rows failed for display, matching native Pi's treatment. Tool `isError`, structured truncation metadata and unresolved calls appear in process counts. Unknown tool-specific textual truncation formats cannot always be classified automatically; the saved output remains available.
 
@@ -50,12 +56,13 @@ An extension that wraps our functions later can keep a reference to our old clos
 
 ## Performance limits
 
-- Closed process rendering is independent of the number/size of its hidden tools.
-- Live state updates use maps; no extension-owned periodic work exists.
+- Each closed process group's rendering is independent of the number/size of its hidden tools.
+- Live tool state and owning-group count updates use maps; no extension-owned periodic work exists.
+- Visible text is parsed while it streams, but earlier completed text components are reused. New groups/text are appended without rescanning historical items.
 - Canonical shells and display references still occupy memory proportional to retained history.
-- Rendering all visible user turns remains linear in turn count; this is not history virtualization.
-- An expanded turn walks its lightweight item rows. Open details pay native Markdown/diff/image costs.
-- Current final answers, native footer accounting and model/tool argument parsing are outside this optimization.
+- Rendering remains linear in visible segment count (text plus process groups); this is not history virtualization.
+- An expanded group walks its lightweight item rows. Open details pay native Markdown/diff/image costs.
+- Current streaming text, native footer accounting and model/tool argument parsing still cost work.
 - Synthetic microbenchmarks measure only `Turn` updates and `TurnView` rendering. They do not prove end-to-end input latency, stable heap usage, or Ghostty pixel cleanup.
 
 ## Manual acceptance before daily use

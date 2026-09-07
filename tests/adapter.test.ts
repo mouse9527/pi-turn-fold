@@ -83,7 +83,7 @@ test('installed Pi 0.85.1 streams parallel tools with a folded projection and ca
     assert.equal(mode.pendingTools.size, 0);
     await mode.handleEvent({ type: 'turn_start' });
     await mode.handleEvent({ type: 'message_start', message: user('user-visible') });
-    const planning = assistant([{ type: 'thinking', thinking: 'secret-thinking' }, { type: 'text', text: 'intermediate-hidden' }, call('a'), call('b')], 'toolUse');
+    const planning = assistant([{ type: 'thinking', thinking: 'secret-thinking' }, { type: 'text', text: 'intermediate-visible' }, call('a'), call('b')], 'toolUse');
     const planningBefore = structuredClone(planning);
     await mode.handleEvent({ type: 'message_start', message: assistant([]) });
     await mode.handleEvent({ type: 'message_update', message: planning });
@@ -93,7 +93,8 @@ test('installed Pi 0.85.1 streams parallel tools with a folded projection and ca
     assert.equal(mode.pendingTools.size, 2);
     const nativeTools = [...mode.pendingTools.values()] as ToolExecutionComponent[];
     assert.ok(nativeTools.every(tool => tool instanceof ToolExecutionComponent && mode.chatContainer.children.includes(tool)));
-    assert.doesNotMatch(text(mode.chatContainer), /secret-thinking|intermediate-hidden|native-probe/);
+    assert.match(text(mode.chatContainer), /intermediate-visible/);
+    assert.doesNotMatch(text(mode.chatContainer), /secret-thinking|native-probe/);
     await mode.handleEvent({ type: 'message_end', message: planning });
     assert.equal(mode.streamingComponent, undefined);
     assert.equal(mode.streamingMessage, undefined);
@@ -109,6 +110,8 @@ test('installed Pi 0.85.1 streams parallel tools with a folded projection and ca
     const final = assistant([{ type: 'thinking', thinking: 'final-thinking-hidden' }, { type: 'text', text: 'final-answer-visible' }]);
     await mode.handleEvent({ type: 'message_start', message: assistant([]) });
     await mode.handleEvent({ type: 'message_update', message: final });
+    assert.match(text(mode.chatContainer), /final-answer-visible/, 'final text streams before message/agent end');
+    assert.match(text(mode.chatContainer), /intermediate-visible/, 'later output never retracts earlier text');
     await mode.handleEvent({ type: 'message_end', message: final });
     mode.activeStatusIndicator = { kind: 'working', dispose: () => counters.disposed++ };
     await mode.handleEvent({ type: 'agent_end' });
@@ -126,7 +129,8 @@ test('installed Pi 0.85.1 streams parallel tools with a folded projection and ca
     assert.match(folded, /user-visible/);
     assert.match(folded, /Process · 2 tools/);
     assert.match(folded, /final-answer-visible/);
-    assert.doesNotMatch(folded, /secret-thinking|final-thinking-hidden|intermediate-hidden|saved-output|native-probe-call/);
+    assert.match(folded, /intermediate-visible/);
+    assert.doesNotMatch(folded, /secret-thinking|final-thinking-hidden|saved-output|native-probe-call/);
     assert.deepEqual([counters.renderCall, counters.renderResult], [0, 0]);
     assert.deepEqual(planning, planningBefore);
     assert.ok(mode.chatContainer.children.includes(nativeAssistant));
@@ -143,7 +147,7 @@ test('installed Pi 0.85.1 streams parallel tools with a folded projection and ca
     assertRestored(chatBefore);
     assert.ok(nativeChildren.every((child: any) => mode.chatContainer.children.includes(child)));
     const restored = text(mode.chatContainer);
-    assert.match(restored, /intermediate-hidden/);
+    assert.match(restored, /intermediate-visible/);
     assert.match(restored, /saved-output-a/);
     assert.doesNotMatch(restored, /Process · 2 tools/);
     adapter.dispose(true);

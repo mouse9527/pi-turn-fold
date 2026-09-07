@@ -39,6 +39,8 @@ with tempfile.TemporaryDirectory(prefix='pi-turn-fold-smoke-') as directory:
                     api='anthropic-messages', provider='test', model='synthetic', usage=usage)
     append(dict(role='user', content='Synthetic folding test', timestamp=0))
     for index in range(300):
+        if index == 150:
+            append(assistant([dict(type='text', text='SYNTHETIC-MIDDLE-MESSAGE')]))
         append(assistant([dict(type='thinking', thinking='Hidden reasoning'),
             dict(type='toolCall', id=f'call-{index}', name='bash', arguments=dict(command='echo PRIVATE-LONG-SCRIPT\n' + 'echo x\n' * 20))], 'toolUse'))
         content = [dict(type='text', text='SAVED-TOOL-OUTPUT\n' * 80)]
@@ -51,7 +53,7 @@ with tempfile.TemporaryDirectory(prefix='pi-turn-fold-smoke-') as directory:
     fixture_check = subprocess.run(['node', '--input-type=module', '-e',
         'import {SessionManager} from "@earendil-works/pi-coding-agent"; const s=SessionManager.open(process.argv[1]); console.log(s.buildContextEntries().length)', str(session)],
         cwd=ROOT, capture_output=True, text=True, check=True)
-    assert int(fixture_check.stdout.strip()) == 602, fixture_check.stdout
+    assert int(fixture_check.stdout.strip()) == 603, fixture_check.stdout
     (home / 'settings.json').write_text(json.dumps(dict(enableInstallTelemetry=False, showCacheMissNotices=False)))
     master, slave = pty.openpty()
     fcntl.ioctl(slave, termios.TIOCSWINSZ, struct.pack('HHHH', 40, 120, 0, 0))
@@ -87,7 +89,10 @@ with tempfile.TemporaryDirectory(prefix='pi-turn-fold-smoke-') as directory:
         initial = until('SYNTHETIC-FINAL-ANSWER')
         assert 'PRIVATE-LONG-SCRIPT' not in initial
         assert 'SAVED-TOOL-OUTPUT' not in initial
-        assert '300 tools' in initial
+        assert '150 tools' in initial
+        assert 'SYNTHETIC-MIDDLE-MESSAGE' in initial
+        middle = initial.index('SYNTHETIC-MIDDLE-MESSAGE')
+        assert '150 tools' in initial[:middle] and '150 tools' in initial[middle:]
         command('/fold 1')
         until('bash echo PRIVATE-LONG-SCRIPT')
         command('/fold 1 300')
@@ -96,7 +101,7 @@ with tempfile.TemporaryDirectory(prefix='pi-turn-fold-smoke-') as directory:
         until('Native transcript restored', seconds=30)
         command('/reload')
         reloaded = until('Reloaded keybindings', seconds=30)
-        assert '300 tools' in reloaded
+        assert '150 tools' in reloaded and 'SYNTHETIC-MIDDLE-MESSAGE' in reloaded
         command('/quit')
         deadline = time.monotonic() + 10
         while process.poll() is None and time.monotonic() < deadline:
@@ -107,7 +112,7 @@ with tempfile.TemporaryDirectory(prefix='pi-turn-fold-smoke-') as directory:
                     break
         process.wait(timeout=3)
         assert process.returncode == 0, process.returncode
-        print('PASS: bundled host identity, default restore folding, two-level expansion, off, reload, quit (300 synthetic calls).')
+        print('PASS: bundled host identity, segmented restore with visible middle text, two-level expansion, off, reload, quit (300 synthetic calls).')
     finally:
         if process.poll() is None:
             process.terminate()

@@ -24,14 +24,14 @@ export default function(pi: ExtensionAPI) {
   pi.on('session_shutdown', () => { adapter?.dispose(); adapter = undefined; });
 
   pi.registerShortcut('ctrl+shift+o', {
-    description: 'Expand/collapse the latest process (pi-turn-fold)',
+    description: 'Expand/collapse process groups in the latest turn (pi-turn-fold)',
     handler: async ctx => {
       if (!adapter?.toggle()) ctx.ui.notify('No folded turn available.', 'info');
     },
   });
 
   pi.registerCommand('fold', {
-    description: 'Toggle process: /fold [turn [tool]], /fold inspect, or /fold off',
+    description: 'Toggle process: /fold [turn [tool]], /fold groups, /fold inspect, /fold off',
     handler: async (args, ctx) => {
       if (!adapter || ctx.mode !== 'tui') { ctx.ui.notify(failure ?? 'Folding is inactive; reload to enable.', 'warning'); return; }
       const input = args.trim();
@@ -41,20 +41,28 @@ export default function(pi: ExtensionAPI) {
         ctx.ui.notify('Native transcript restored. /reload to enable folding again.', 'info');
         return;
       }
-      if (input === 'inspect') {
+      if (input === 'inspect' || input === 'groups') {
         const choices = adapter.views.map((view, i) => `${i + 1}. ${view.turn.summary()}`);
         const choice = await ctx.ui.select('Select turn', choices);
         if (!choice || !adapter) return;
         const view = adapter.views[choices.indexOf(choice)];
         if (!view) return;
-        const items = view.turn.items.map((item, i) => `${i + 1}. ${item.kind === 'tool' ? toolLabel(item) : 'Assistant / thinking'}`);
+        if (input === 'groups') {
+          const groups = view.turn.segments.filter(segment => segment.kind === 'process');
+          const labels = groups.map((group, i) => `${i + 1}. ${group.summary(view.turn.running)}`);
+          const choice = await ctx.ui.select('Toggle one process group', labels);
+          if (choice && adapter?.views.includes(view)) view.toggleGroup(labels.indexOf(choice));
+          return;
+        }
+        const saved = view.turn.items.filter(item => view.turn.groupOf.has(item));
+        const items = saved.map((item, i) => `${i + 1}. ${item.kind === 'tool' ? toolLabel(item) : 'Thinking'}`);
         const item = await ctx.ui.select('Select saved process item', items);
         if (!item || !adapter || !adapter.views.includes(view)) return;
-        view.toggleItem(view.turn.items[items.indexOf(item)]);
+        view.toggleItem(saved[items.indexOf(item)]);
         return;
       }
       if (input && !/^\d+(?:\s+\d+)?$/.test(input)) {
-        ctx.ui.notify('Usage: /fold [turn [tool]], /fold inspect, /fold off', 'info');
+        ctx.ui.notify('Usage: /fold [turn [tool]], /fold groups, /fold inspect, /fold off', 'info');
         return;
       }
       const [turn, tool] = input ? input.split(/\s+/).map(Number) : [];

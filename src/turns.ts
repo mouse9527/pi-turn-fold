@@ -9,11 +9,35 @@ export type Tool = {
 };
 export type Assistant = { kind: 'assistant'; message: AssistantMessage; revision: number };
 export type Item = Tool | Assistant;
+export type TextSegment = { kind: 'text'; text: string; assistant: Assistant; streaming: boolean; revision: number };
+
+/** Counts are updated by tool ID, never by scanning the group's saved outputs. */
+export class ProcessGroup {
+  readonly kind = 'process';
+  items: Item[] = [];
+  count = 0;
+  completed = 0;
+  failed = 0;
+  truncated = 0;
+  revision = 0;
+
+  summary(running: boolean) {
+    const pending = this.count - this.completed - this.failed;
+    return `${running && pending ? 'Working' : 'Process'} · ${this.count ? `${this.count} tools` : 'thinking'}` +
+      (pending ? ` · ${pending} ${running ? 'pending' : 'unfinished'}` : '') +
+      (this.failed ? ` · ⚠ ${this.failed} failed` : '') +
+      (this.truncated ? ` · ⚠ ${this.truncated} truncated` : '');
+  }
+}
 
 /** Display-only references. Never mutates messages, arguments, results or session entries. */
 export class Turn {
   items: Item[] = [];
   tools = new Map<string, Tool>();
+  segments: (ProcessGroup | TextSegment)[] = [];
+  groupOf = new Map<Item, ProcessGroup>();
+  private activeGroup?: ProcessGroup;
+  private textBlocks = new Map<number, TextSegment>();
   final?: Assistant;
   streaming?: Assistant;
   running = false;
@@ -23,12 +47,24 @@ export class Turn {
   warnings: string[] = [];
   revision = 0;
 
+  private addToGroup(item: Item) {
+    if (!this.activeGroup) {
+      this.activeGroup = new ProcessGroup();
+      this.segments.push(this.activeGroup);
+    }
+    this.activeGroup.items.push(item);
+    if (item.kind === 'tool') this.activeGroup.count++;
+    this.activeGroup.revision++;
+    this.groupOf.set(item, this.activeGroup);
+  }
+
   tool(id: string, name: string, args: Record<string, unknown>): Tool {
     let tool = this.tools.get(id);
     if (!tool) {
       tool = { kind: 'tool', id, name, args, status: 'pending', revision: 0, truncated: false };
       this.tools.set(id, tool);
       this.items.push(tool);
+      this.addToGroup(tool);
     } else {
       tool.args = args;
       tool.revision++;
@@ -41,26 +77,41 @@ export class Turn {
     this.final = undefined;
     this.streaming = { kind: 'assistant', message, revision: 0 };
     this.items.push(this.streaming);
-    this.revision++;
+    this.textBlocks.clear();
+    this.updateAssistant(message);
   }
 
   updateAssistant(message: AssistantMessage) {
-    if (!this.streaming) this.startAssistant(message);
-    this.streaming!.message = message;
-    this.streaming!.revision++;
+    if (!this.streaming) { this.startAssistant(message); return; }
+    const item = this.streaming;
+    item.message = message;
+    item.revision++;
+    // Only the current message is visited. Completed messages/groups are never regrouped.
+    for (const [index, block] of message.content.entries()) {
+      if (block.type === 'text' && block.text.trim()) {
+        let segment = this.textBlocks.get(index);
+        if (!segment) {
+          segment = { kind: 'text', text: block.text, assistant: item, streaming: true, revision: 0 };
+          this.textBlocks.set(index, segment);
+          this.segments.push(segment);
+          this.activeGroup = undefined; // Visible text seals the preceding process group.
+        } else if (segment.text !== block.text) {
+          segment.text = block.text;
+          segment.revision++;
+        }
+      } else if (block.type === 'toolCall') {
+        this.tool(block.id, block.name, block.arguments);
+      } else if (block.type === 'thinking' && block.thinking.trim() && !this.groupOf.has(item)) {
+        this.addToGroup(item);
+      }
+    }
     this.revision++;
   }
 
   endAssistant(message: AssistantMessage) {
     this.updateAssistant(message);
-    let calls = false;
-    for (const block of message.content) {
-      if (block.type === 'toolCall') {
-        calls = true;
-        this.tool(block.id, block.name, block.arguments);
-      }
-    }
-    if (!calls) this.final = this.streaming;
+    if (!message.content.some(block => block.type === 'toolCall')) this.final = this.streaming;
+    for (const segment of this.textBlocks.values()) { segment.streaming = false; segment.revision++; }
     if (message.stopReason === 'error' || message.stopReason === 'aborted' || message.stopReason === 'length') {
       const label = { error: 'Error', aborted: 'Operation aborted', length: 'Response truncated' }[message.stopReason];
       this.warnings.push(message.errorMessage ? `${label}: ${message.errorMessage}` : label);
@@ -76,18 +127,23 @@ export class Turn {
   }
 
   result(tool: Tool, result: Result, partial = false) {
+    const group = this.groupOf.get(tool)!;
     // End events and persisted toolResult messages may both describe the same result.
-    if (tool.status === 'done') this.completed--;
-    if (tool.status === 'error') this.failed--;
-    if (tool.truncated) this.truncated--;
+    for (const counts of [this, group]) {
+      if (tool.status === 'done') counts.completed--;
+      if (tool.status === 'error') counts.failed--;
+      if (tool.truncated) counts.truncated--;
+    }
     tool.result = result;
     tool.status = partial ? 'running' : result.isError ? 'error' : 'done';
     tool.truncated = Boolean(result.details?.truncation?.truncated || result.details?.truncated);
-    if (tool.status === 'done') this.completed++;
-    if (tool.status === 'error') this.failed++;
-    if (tool.truncated) this.truncated++;
+    for (const counts of [this, group]) {
+      if (tool.status === 'done') counts.completed++;
+      if (tool.status === 'error') counts.failed++;
+      if (tool.truncated) counts.truncated++;
+      counts.revision++;
+    }
     tool.revision++;
-    this.revision++;
   }
 
   finish() {

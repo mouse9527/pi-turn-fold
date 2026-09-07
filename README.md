@@ -1,28 +1,34 @@
 # pi-turn-fold
 
-**Experimental default turn folding for Pi 0.85.1.** A standalone Pi extension, not a fork. MIT licensed.
+**Experimental segmented tool folding for Pi 0.85.1.** A standalone Pi extension, not a fork. MIT licensed.
 
-Keep the question and final answer visible. Fold intermediate assistant text, thinking, tool arguments, results and tool images into one process row—also while working.
+Assistant text streams normally and stays visible. Consecutive tool calls and thinking fold into process groups; **visible text separates the groups**. Tool arguments, results and images stay collapsed while working.
 
 ```text
 Your question
 
-▸ Process · 8 tools
+▸ Process · 3 tools                     # a, b, c
 
-Final answer
+Found the issue. Next I'll update the config.   # streamed immediately
+
+▸ Process · 3 tools                     # d, e, f
+
+Fixed; tests passed.                    # also streamed immediately
 ```
 
-Expand the process, then an individual item:
+Expand one process group, then an individual item:
 
 ```text
-▾ Process · 8 tools
-  ▸ Assistant / thinking
+▾ Process · 3 tools
+  ▸ Thinking
   ▸ read src/auth.ts · done
   ▸ bash python3 · done
   ▾ edit src/auth.ts · done
     Arguments …
     [native saved edit diff]
 ```
+
+Groups expand independently. Later tool calls never pull earlier assistant text back into a fold. Plain-text answers without tools or thinking create no empty process row. This is **not** a final-answer-only Focus view.
 
 Failures, aborted responses, truncation and unfinished calls are indicated outside the collapsed details. Pi's extension dialogs, notices, editor and execution behavior remain native.
 
@@ -53,19 +59,20 @@ Folding is **on by default**; there is no `/focus` step.
 
 | Action | Control |
 | --- | --- |
-| Toggle latest process | `Ctrl+Shift+O` or `/fold` |
-| Toggle numbered process | `/fold 2` |
-| Toggle a tool within that process | `/fold 2 3` (third tool, not third assistant item) |
-| Pick any saved tool/assistant/thinking item with the keyboard | `/fold inspect` |
-| Click process or item header | Fullscreen mode only |
+| Toggle all process groups in the latest user turn | `Ctrl+Shift+O` or `/fold` |
+| Toggle all groups in a numbered user turn | `/fold 2` |
+| Toggle a tool, opening only its containing group | `/fold 2 3` (third tool in user turn 2) |
+| Pick one process group to toggle with the keyboard | `/fold groups` |
+| Pick any saved tool/thinking item with the keyboard | `/fold inspect` |
+| Click one group or item header | Fullscreen mode only |
 | Restore native transcript for this run | `/fold off` |
 | Re-enable after `/fold off` | `/reload` |
 
-Numbers start at 1 in the currently displayed, compaction-aware history. Regular terminal mode supports commands/keyboard, but not mouse clicks. `Ctrl+O` remains Pi's native tool-expansion control; it does **not** open process rows. Use the controls above for folded items.
+User-turn and tool numbers start at 1 in the currently displayed, compaction-aware history; a user turn can contain several process groups. Regular terminal mode supports commands/keyboard, but not mouse clicks. `Ctrl+O` remains Pi's native tool-expansion control; it does **not** open process rows. Use the controls above for folded items.
 
 ## Scope and limits
 
-- **Final text appears at the end of the agent run**, not token by token. This avoids repeatedly showing intermediate text and taking it away when another tool call follows. During generation, the process summary stays visible. Expand a process item to inspect current text.
+- **All assistant text is shown token by token**, including intermediate explanations and final answers. Display follows content-block order, including text and tool calls interleaved within one assistant message. Only thinking and tool activity fold; later activity does not retract earlier text.
 - Tool details reuse Pi's native renderer, plus a saved-arguments inspector. Custom/MCP tools use their registered renderer or the native fallback.
 - `edit` uses the diff saved in the result. Historical expansion does not preview the edit against today's file.
 - `write` shows saved written content. **No old-file snapshot means no trustworthy before/after diff.** This extension does not capture snapshots or change writes.
@@ -76,7 +83,7 @@ Numbers start at 1 in the currently displayed, compaction-aware history. Regular
 
 ## Performance and validation
 
-Collapsed tools do not invoke native result/diff/image rendering. Pi's lightweight canonical component shells remain so native lifecycle handling is preserved; a separate visible component tree skips them during layout. Tool state is updated by ID, not by rescanning history. Details are created on demand and dropped on collapse. The extension adds no timer.
+Collapsed tools do not invoke native result/diff/image rendering. Pi's lightweight canonical component shells remain so native lifecycle handling is preserved; a separate visible component tree skips them during layout. Tool state and group counts are updated by ID, not by rescanning history. Only the current assistant message is inspected for new text/tool boundaries. Completed text components are reused, not rebuilt when later tools update. Details are created on demand and dropped on collapse. The extension adds no timer.
 
 Local synthetic display microbenchmark (Node 22, Pi 0.85.1):
 
@@ -86,12 +93,13 @@ Local synthetic display microbenchmark (Node 22, Pi 0.85.1):
 | 1,000 | 1 | ~0.012 ms |
 | 10,000 | 1 | ~0.011 ms |
 | 10,000 | 100 | ~0.67 ms |
+| 1,000 | 100, with 99 visible text separators | ~0.71 ms |
 
-**These are not input-to-screen latency or total Pi CPU measurements.** They exclude footer statistics, host event/argument parsing, terminal writes and visible image conversion. Many expanded items, very long final answers and very many user turns can still be expensive. There is no blanket “never lags” claim.
+**These are not input-to-screen latency or total Pi CPU measurements.** They exclude footer statistics, host event/argument parsing, terminal writes and visible image conversion. Many expanded items, long streaming text, or many visible text/group segments can still be expensive. There is no blanket “never lags” claim.
 
 Verified locally:
-- State and native-component integration tests: streaming, parallel completion, failure visibility, lazy rendering, saved edit diff, click coordinates, cleanup and reinstall.
-- Actual bundled Pi CLI in isolated regular and fullscreen PTYs: restore 300 synthetic tool calls with three image attachments; two-level expansion; native restoration; reload; quit. No model request is sent.
+- State and native-component integration tests: live text, text/tool block ordering, independent group expansion, live/history parity, cached earlier text, parallel completion, failure visibility, lazy rendering, saved edit diff, click coordinates, cleanup and reinstall.
+- Actual bundled Pi CLI in isolated regular and fullscreen PTYs: restore 300 synthetic tool calls with three image attachments, split into two groups around visible middle text; two-level expansion; native restoration; reload; quit. No model request is sent.
 - 50 repeated process expand/collapse cycles release detail rows.
 
 **Still needs manual acceptance:** Ghostty image pixel cleanup, real long-session input/scroll latency, and sustained heap/CPU profiling. PTY tests are not a substitute for those checks. Treat this as a prototype until your own session passes them.
@@ -114,6 +122,6 @@ Node 22.19+ and Python 3 are required for the checks; no test framework is added
 
 ## 中文说明
 
-这是一个**默认整轮折叠**的实验性 Pi 插件，不需要手动进入 Focus。平时保留问题、过程摘要和最终回复；需要时展开过程，再展开工具查看参数、结果、图片和已有的 `edit` diff。
+这是一个**文字实时显示、工具分段折叠**的实验性 Pi 插件，不需要手动进入 Focus。连续工具 a、b、c 折叠成一组；中间的助手说明正常显示；后续工具 d、e、f 另起一组。文字不会因为继续调用工具而被收回。每组可独立展开，再展开工具查看参数、结果、图片和已有的 `edit` diff。
 
 仅支持 **Pi 0.85.1**，不修改安装文件、不维护 Pi 分支，但依赖内存中的内部接口适配。先用上面的临时加载命令和会话副本试用；不要与其他工具显示插件混用。性能微基准与终端冒烟测试已通过，真实 Ghostty 图片和长会话手感仍需实测。

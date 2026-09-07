@@ -1,7 +1,7 @@
 {
   "name": "pi-turn-fold",
-  "version": "0.1.0",
-  "description": "Experimental default turn folding for Pi, with lazy tool details",
+  "version": "0.2.0",
+  "description": "Live assistant text and segmented tool folding for Pi, with lazy tool details",
   "type": "module",
   "license": "MIT",
   "repository": { "type": "git", "url": "https://github.com/mouse9527/pi-turn-fold.git" },
