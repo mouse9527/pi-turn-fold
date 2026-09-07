@@ -1,14 +1,14 @@
 # 发布方案：先 Git tag + GitHub Release
 
-> 本文是维护者操作方案，不代表已经发布；其中写入、推送、打 tag、发布命令均待维护者批准后执行。
-> 依据已提交基线 `dc34942fb63f0faa9d090326360fcbd1e870a9c2`（package version `0.2.1`），不评价并行开发中的改动。
+> 首个实验预发布 [`v0.3.0-rc.1`](https://github.com/mouse9527/pi-turn-fold/releases/tag/v0.3.0-rc.1) 已发布；对应提交为 `0fcdead2d9e5b9a168395dc00ca40709f03db3fe`。发布分支与 tag CI 均通过，固定 tag 安装已验证。下文保留准备流程与后续发布方案，不应盲目重跑已执行的创建命令。
+> 本次从基线 `14b6f9217c90d771a189923a384670ffcbe2cb92`（原 package version `0.2.1`）在隔离工作树的 `release/v0.3.0-rc.1` 分支准备候选；不修改开发工作树。
 
 ## 1. 最小方案与现状
 
 - **推荐**：Git 安装作为一等分发方式；annotated tag 固定源码，GitHub Release 提供说明、兼容性和验证证据。
 - **已有**：公开 MIT 仓库、Pi package manifest、源码 TS、lockfile，以及 `.github/workflows/ci.yml` 的 push/PR 检查。
 - CI 已配置 `npm ci --ignore-scripts`、typecheck、node:test、microbench、真实 bundled Pi CLI 的 regular/fullscreen 隔离 PTY smoke。
-- **当前**：`main` 仍是开发分支，没有有意发布的 tag/Release；前次只读查询 tags API 返回 `[]`、`gh release list` 为空（本次未重新查询）。历史版本号/版本提交不等于公开 Release。
+- **当前**：`main` 仍是开发分支；`v0.3.0-rc.1` 从隔离的 `release/v0.3.0-rc.1` 分支发布，未晋升为稳定 Latest。公开状态以 [GitHub Releases](https://github.com/mouse9527/pi-turn-fold/releases) 为准，历史版本号/版本提交本身不等于公开 Release。
 - **未来建议，尚未实施**：`dev` 承载开发/候选，默认分支 `main` 仅接收已验证的正式发布 SHA；届时无 ref 安装才可作为稳定更新渠道。现在无 ref 得到的是最新开发源码，不宣称稳定。
 - **尚未实现/本方案不新增**：release workflow、tag 保护规则、npm 分发、自动版本提升或自动 release notes。
 - 先用人工 `gh release create --draft` + 审核后发布；已有 CI 足够，不新增流水线、token 或发布依赖。
@@ -17,7 +17,7 @@
 
 ## 2. 版本与状态必须分开
 
-即将增加用户可见功能，建议候选 **`0.3.0-rc.1`**；人工验收通过再发布 **`0.3.0`**。
+本次准备实验候选 **`0.3.0-rc.1`**；人工验收通过后才考虑正式 **`0.3.0`**。
 0.x 表示接口仍可能变化；本项目约定：功能/不兼容交互或宿主支持策略变化升 minor，纯兼容修复升 patch（例如 `0.2.2`）。
 这不是宣称 SemVer 为所有 0.x 项目强制规定了同一种兼容策略。
 
@@ -59,8 +59,8 @@ optional peers 的 `*` 是 Pi 核心供给/装载声明，**不是宿主兼容�
 
 ## 4. 维护者准备与本地验证（批准后执行）
 
-先等功能合入、review 完成，再在维护者干净 checkout 执行；不要操作另一位开发者的在途工作树。
-以下命令以未来渠道策略已获批准并建立、`dev` 分支已存在为前提；候选及正式版准备都在 `dev` 完成，RC 不进入 `main`。以下是检查/验收，不是本地构建或产物发布。
+本次在从上述基线创建的隔离 release 工作树执行；不要操作另一位开发者的在途工作树。
+以下准备命令针对本次 `release/v0.3.0-rc.1` 分支，RC 不进入 `main`；未来 `dev` 开发 / `main` 稳定策略尚未实施。验证无需本地构建或编译产物。
 `origin` 应指向 `https://github.com/mouse9527/pi-turn-fold.git`（SSH 同仓库也可）。
 
 ```bash
@@ -71,11 +71,10 @@ VERSION=0.3.0-rc.1
 TAG=v$VERSION
 git remote -v
 test -z "$(git status --porcelain)"
-git switch dev
-test "$(git branch --show-current)" = dev
+test "$(git branch --show-current)" = release/v0.3.0-rc.1
 npm version "$VERSION" --no-git-tag-version --ignore-scripts
 # 核对 package.json 与 package-lock.json 同步；人工更新 README 的实际变化/限制。
-git diff -- package.json package-lock.json README.md
+git diff -- package.json package-lock.json README.md docs/release.md
 npm ci --ignore-scripts --no-audit --no-fund
 npm run check
 npm test
@@ -85,7 +84,7 @@ node "$CLI" --version
 python3 tests/smoke.py "$CLI"
 FOLD_SMOKE_FULLSCREEN=1 python3 tests/smoke.py "$CLI"
 # 此处完成第 3 节人工验收；仅使用隔离配置、合成历史或会话副本。
-git add package.json package-lock.json README.md
+git add package.json package-lock.json README.md docs/release.md
 git diff --cached --check
 git diff --cached
 # 确认暂存区没有会话、凭据、截图中的私人信息、个人路径或其他未批准文件。
@@ -97,7 +96,7 @@ git push origin "$BRANCH"
 
 smoke 默认也指向上述 bundled CLI；显式参数防止误测另一个全局 Pi。
 该脚本建立临时 agent 目录及 300 次合成工具历史（含三张图片），不发送模型请求。
-本文件只审阅脚本和已有声明，**没有在本次编写中运行测试，也没有确认未来候选的 CI 结果**。
+本次候选的本地测试结果记录于仓库外 release notes；最终 commit SHA 和分支/tag CI URL 必须由维护者验证后补齐，不能据准备过程宣称 CI 已通过。
 保存候选 SHA、命令退出码、Node/Pi 版本、bench 输出和人工结果；公开证据只用脱敏摘要/合成材料。
 
 ## 5. CI、tag、公开 Release（逐步人工确认）
@@ -115,7 +114,7 @@ test "$(gh run view "$RUN_ID" --repo "$REPO" --json headBranch --jq .headBranch)
 test "$(gh run view "$RUN_ID" --repo "$REPO" --json conclusion --jq .conclusion)" = success
 ```
 
-未来正式版晋升（RC 跳过）：先在 `dev` 完成正式版本号的准确 SHA CI + 第 3 节人工门禁，保存证据；维护者批准后才执行：
+未来正式版晋升（本次 RC 跳过；仅当未来分支策略另行批准并建立后适用）：先在 `dev` 完成正式版本号的准确 SHA CI + 第 3 节人工门禁，保存证据；维护者批准后才执行：
 
 ```bash
 git fetch origin
@@ -185,7 +184,7 @@ pi update --extension git:github.com/mouse9527/pi-turn-fold
 pi update --extensions
 pi list
 # 锁定版本（示例 tag 仅在实际推送后可用）；升版重新 install 新 tag：
-pi install git:github.com/mouse9527/pi-turn-fold@v0.3.0
+pi install git:github.com/mouse9527/pi-turn-fold@v0.3.0-rc.1
 # 项目级安装加 -l；包命令须紧跟 pi，不写 pi --flag install ...。
 ```
 
@@ -205,7 +204,7 @@ pi install git:github.com/mouse9527/pi-turn-fold@v0.3.0
 发布前记录“上一已验证 ref”；首次发布没有旧 tag，可选择经重新验证的基线完整 commit：
 
 ```bash
-pi install git:github.com/mouse9527/pi-turn-fold@dc34942fb63f0faa9d090326360fcbd1e870a9c2
+pi install git:github.com/mouse9527/pi-turn-fold@14b6f9217c90d771a189923a384670ffcbe2cb92
 # 后续也可用真实存在的旧 immutable tag；随后在 Pi 内 /reload 一次。
 ```
 
@@ -237,4 +236,4 @@ Pi 协调 Git ref 时可能 reset + clean checkout，并在存在 package.json �
 
 默认决定：先 GitHub 手动发布，不上 npm。仅当需要 npm 搜索/registry 安装或确有用户需求时再申请 npm 名称、内容审计和凭据方案；若采用该渠道，npm 更新语义须按届时 Pi 版本另行核验。
 若人工发布频率真正成为负担，再单独批准最小 `workflow_dispatch` + 人工 environment gate；本轮不创建 workflow、不改权限或保护规则。
-依据：原方案基线 package/CI/README、adapter 与测试；本次完整核对已安装 Pi 0.85.1 的 `docs/packages.md`、`quickstart.md`、`usage.md`，并读取 `dist/core/package-manager.js` 的 `checkForAvailableUpdates`、`getLocalGitUpdateTarget`、`installGit`、`updateGit`、`ensureGitRef` 实现。宿主升级后重新核对；本次只改本文，未实施分支策略、运行安装/更新/测试或发布。
+依据：原方案基线 package/CI/README、adapter 与测试；原方案编写时完整核对已安装 Pi 0.85.1 的 `docs/packages.md`、`quickstart.md`、`usage.md`，并读取 `dist/core/package-manager.js` 的 `checkForAvailableUpdates`、`getLocalGitUpdateTarget`、`installGit`、`updateGit`、`ensureGitRef` 实现。宿主升级后重新核对；上述实现核对为原方案记录。候选准备后，维护者独立复验并确认[分支 CI](https://github.com/mouse9527/pi-turn-fold/actions/runs/34137808216)与 [tag CI](https://github.com/mouse9527/pi-turn-fold/actions/runs/34138061325)均通过，随后公开预发布并验证固定 tag 安装。未来稳定分支策略尚未实施，人工终端/图片等未测边界仍见 Release notes。

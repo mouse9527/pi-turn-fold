@@ -40,12 +40,12 @@ Failures, aborted responses, truncation and unfinished calls are indicated outsi
 
 Requires **Pi 0.85.1**. Disable conflicting transcript/tool renderers before loading; review the source because extensions run with full system access.
 
-### Published release (version-locked)
+### Experimental release candidate (version-locked)
 
-**No tags or releases are published yet.** Once available, choose a tag from [GitHub Releases](https://github.com/mouse9527/pi-turn-fold/releases) and replace `<published-tag>` below; this is a template, not an existing release:
+**[v0.3.0-rc.1](https://github.com/mouse9527/pi-turn-fold/releases/tag/v0.3.0-rc.1) is a published experimental prerelease for Pi 0.85.1 only**, not a stable Latest release. See its Release notes for verification evidence and known limits. Install this fixed version directly, without a local build:
 
 ```bash
-pi install 'git:github.com/mouse9527/pi-turn-fold@<published-tag>'
+pi install git:github.com/mouse9527/pi-turn-fold@v0.3.0-rc.1
 ```
 
 Pi fetches the tagged source and loads TypeScript through its extension loader. No manual clone, local compilation, `npm run build`, `tsc`, or npm account is needed. Pi may run `npm install` automatically for package dependencies. No release ZIP download or compiled artifact is required.
@@ -62,7 +62,7 @@ pi update --extension git:github.com/mouse9527/pi-turn-fold
 pi update --extensions
 ```
 
-Tagged installs remain version-locked: install the source again with a newer published tag to upgrade. `@latest` is not a magic GitHub Latest Release alias. A future policy of validated releases on `main` and development on `dev` is not yet in effect; unpinned does not currently mean latest stable.
+Version tags are immutable. Tagged installs remain version-locked: native updates do not select a newer release; manually install the source again with a newer published tag to upgrade. `@latest` is not a magic GitHub Latest Release alias. A future policy of validated releases on `main` and development on `dev` is not yet in effect; unpinned does not currently mean latest stable.
 
 Restart Pi after installation or changing renderer packages; normal startup loads the registered extension in your existing terminal mode. After a code-only update, restart or use `/reload`. Installation does not disable conflicting renderers automatically.
 
