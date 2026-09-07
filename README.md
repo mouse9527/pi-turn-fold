@@ -65,10 +65,14 @@ Folding is **on by default**; there is no `/focus` step.
 | Pick one process group to toggle with the keyboard | `/fold groups` |
 | Pick any saved tool/thinking item with the keyboard | `/fold inspect` |
 | Click one group or item header | Fullscreen mode only |
-| Restore native transcript for this run | `/fold off` |
-| Re-enable after `/fold off` | `/reload` |
+| Immediately switch to native transcript | `/fold off` |
+| Immediately re-enable folding, without reloading | `/fold on` |
 
 User-turn and tool numbers start at 1 in the currently displayed, compaction-aware history; a user turn can contain several process groups. Regular terminal mode supports commands/keyboard, but not mouse clicks. `Ctrl+O` remains Pi's native tool-expansion control; it does **not** open process rows. Use the controls above for folded items.
+
+`/fold on` and `/fold off` can be used while tools or text are streaming; they do not interrupt execution or reload other extensions. Turning off closes expanded plugin details. These switches affect the current runtime only: startup and `/reload` default to on. Updating the extension's **code** still requires one reload to load the new implementation.
+
+Off is a display switch, not an unload: lightweight event/group state keeps tracking so re-enabling can show current history immediately. Native display caches may remain after switching back on. For a no-extension performance baseline, use a fresh process without this extension.
 
 ## Scope and limits
 
@@ -99,8 +103,8 @@ Local synthetic display microbenchmark (Node 22, Pi 0.85.1):
 
 Verified locally:
 - State and native-component integration tests: live text, text/tool block ordering, independent group expansion, live/history parity, cached earlier text, parallel completion, failure visibility, lazy rendering, saved edit diff, click coordinates, cleanup and reinstall.
-- Actual bundled Pi CLI in isolated regular and fullscreen PTYs: restore 300 synthetic tool calls with three image attachments, split into two groups around visible middle text; two-level expansion; native restoration; reload; quit. No model request is sent.
-- 50 repeated process expand/collapse cycles release detail rows.
+- Actual bundled Pi CLI in isolated regular and fullscreen PTYs: restore 300 synthetic tool calls with three image attachments, split into two groups around visible middle text; two-level expansion; off/on without reload; reload; quit. No model request is sent.
+- 50 repeated process expand/collapse cycles release detail rows; 50 off/on cycles retain the same canonical components/wrappers without stacking new ones.
 
 **Still needs manual acceptance:** Ghostty image pixel cleanup, real long-session input/scroll latency, and sustained heap/CPU profiling. PTY tests are not a substitute for those checks. Treat this as a prototype until your own session passes them.
 

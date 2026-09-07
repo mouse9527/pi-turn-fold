@@ -16,6 +16,7 @@ export function installAdapter(version = VERSION) {
   const undo: (() => void)[] = [];
   let mode: Host;
   let disposed = false;
+  let enabled = true;
   let scope = 0;
   let live = false;
   let current: Turn | undefined;
@@ -85,11 +86,15 @@ export function installAdapter(version = VERSION) {
       projection.removeChild(viewAnchors.get(child) ?? child);
     });
     patch(chat, 'clear', original => function() { reset(); return original.call(this); });
-    patch(chat, 'render', () => function(width) { return projection.render(width); });
-    patch(chat, 'handleMouse', () => function(event) { return projection.handleMouse(event); });
+    patch(chat, 'render', original => function(width) {
+      return enabled ? projection.render(width) : original.call(this, width);
+    });
+    patch(chat, 'handleMouse', original => function(event) {
+      return enabled ? projection.handleMouse(event) : original.call(this, event);
+    });
     patch(chat, 'invalidate', original => function() {
       original.call(this);
-      for (const view of views) view.invalidate();
+      if (enabled) for (const view of views) view.invalidate();
     });
   }
 
@@ -140,6 +145,32 @@ export function installAdapter(version = VERSION) {
     }
   }
 
+  function hydrateNative() {
+    for (const child of mode.chatContainer.children) {
+      if (!hidden.has(child)) continue;
+      // Avoid historical edit preview while restoring the native display.
+      if (child instanceof ToolExecutionComponent) {
+        (child as any).argsComplete = false;
+        (child as any).updateDisplay();
+        (child as any).maybeConvertImagesForKitty();
+      } else if (child instanceof AssistantMessageComponent) child.invalidate();
+    }
+  }
+
+  function setEnabled(value: boolean) {
+    if (disposed || !mode) return false;
+    if (enabled === value) return true;
+    enabled = value;
+    if (enabled) projection.invalidate();
+    else {
+      // Drop open detail views. Keep lightweight event state current for immediate re-enable.
+      for (const view of views) if (view.open) view.toggle();
+      hydrateNative();
+    }
+    mode.ui.requestRender(true);
+    return true;
+  }
+
   function dispose(hydrate = false) {
     if (disposed) return;
     disposed = true;
@@ -148,17 +179,7 @@ export function installAdapter(version = VERSION) {
     if (mode) {
       // Remove only our anchors; canonical native components were never rearranged.
       mode.chatContainer.children = mode.chatContainer.children.filter((child: Component) => !viewAnchors.has(child));
-      if (hydrate) {
-        for (const child of mode.chatContainer.children) {
-          if (!hidden.has(child)) continue;
-          // Avoid historical edit preview while restoring the native display.
-          if (child instanceof ToolExecutionComponent) {
-            (child as any).argsComplete = false;
-            (child as any).updateDisplay();
-            (child as any).maybeConvertImagesForKitty();
-          } else if (child instanceof AssistantMessageComponent) child.invalidate();
-        }
-      }
+      if (hydrate) hydrateNative();
     }
     reset();
     if (hydrate) mode?.ui.requestRender(true);
@@ -168,7 +189,7 @@ export function installAdapter(version = VERSION) {
   try {
     proto[owner] = true;
     patch(AssistantMessageComponent.prototype, 'updateContent', original => function(message, streaming) {
-      if (scope || hidden.has(this)) {
+      if (enabled && (scope || hidden.has(this))) {
         hidden.add(this);
         this.lastMessage = message;
         this.isStreaming = streaming ?? this.isStreaming;
@@ -177,11 +198,11 @@ export function installAdapter(version = VERSION) {
       return original.call(this, message, streaming);
     });
     patch(ToolExecutionComponent.prototype, 'updateDisplay', original => function() {
-      if ((mode && this.ui === mode.ui) || hidden.has(this)) { hidden.add(this); return; }
+      if (enabled && ((mode && this.ui === mode.ui) || hidden.has(this))) { hidden.add(this); return; }
       return original.call(this);
     });
     patch(ToolExecutionComponent.prototype, 'maybeConvertImagesForKitty', original => function() {
-      if (!hidden.has(this)) return original.call(this);
+      if (!enabled || !hidden.has(this)) return original.call(this);
     });
     patch(proto, 'bindCurrentSessionExtensions', original => function(...args) {
       capture(this);
@@ -231,8 +252,11 @@ export function installAdapter(version = VERSION) {
   return {
     views,
     get captured() { return Boolean(mode); },
+    get enabled() { return enabled && !disposed; },
+    setEnabled,
     dispose,
     toggle(turn = views.length - 1, tool?: number) {
+      if (!enabled || disposed) return false;
       const view = views[turn];
       if (!view) return false;
       if (tool !== undefined) return view.toggleTool(tool);

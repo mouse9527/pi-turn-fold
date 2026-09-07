@@ -1,6 +1,6 @@
 {
   "name": "pi-turn-fold",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "Live assistant text and segmented tool folding for Pi, with lazy tool details",
   "type": "module",
   "license": "MIT",

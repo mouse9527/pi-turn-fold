@@ -26,21 +26,22 @@ export default function(pi: ExtensionAPI) {
   pi.registerShortcut('ctrl+shift+o', {
     description: 'Expand/collapse process groups in the latest turn (pi-turn-fold)',
     handler: async ctx => {
-      if (!adapter?.toggle()) ctx.ui.notify('No folded turn available.', 'info');
+      if (adapter && !adapter.enabled) ctx.ui.notify('Folding is off. Use /fold on to enable.', 'info');
+      else if (!adapter?.toggle()) ctx.ui.notify('No folded turn available.', 'info');
     },
   });
 
   pi.registerCommand('fold', {
-    description: 'Toggle process: /fold [turn [tool]], /fold groups, /fold inspect, /fold off',
+    description: 'Toggle process: /fold [turn [tool]], /fold groups, /fold inspect, /fold on|off',
     handler: async (args, ctx) => {
-      if (!adapter || ctx.mode !== 'tui') { ctx.ui.notify(failure ?? 'Folding is inactive; reload to enable.', 'warning'); return; }
+      if (!adapter || ctx.mode !== 'tui') { ctx.ui.notify(failure ?? 'Folding is unavailable in this runtime.', 'warning'); return; }
       const input = args.trim();
-      if (input === 'off') {
-        adapter.dispose(true);
-        adapter = undefined;
-        ctx.ui.notify('Native transcript restored. /reload to enable folding again.', 'info');
+      if (input === 'on' || input === 'off') {
+        if (!adapter.setEnabled(input === 'on')) ctx.ui.notify('Interactive host is not ready yet.', 'warning');
+        else ctx.ui.notify(input === 'on' ? 'Folding enabled.' : 'Native transcript restored. /fold on to enable folding again.', 'info');
         return;
       }
+      if (!adapter.enabled) { ctx.ui.notify('Folding is off. Use /fold on to enable.', 'info'); return; }
       if (input === 'inspect' || input === 'groups') {
         const choices = adapter.views.map((view, i) => `${i + 1}. ${view.turn.summary()}`);
         const choice = await ctx.ui.select('Select turn', choices);
@@ -62,7 +63,7 @@ export default function(pi: ExtensionAPI) {
         return;
       }
       if (input && !/^\d+(?:\s+\d+)?$/.test(input)) {
-        ctx.ui.notify('Usage: /fold [turn [tool]], /fold groups, /fold inspect, /fold off', 'info');
+        ctx.ui.notify('Usage: /fold [turn [tool]], /fold groups, /fold inspect, /fold on|off', 'info');
         return;
       }
       const [turn, tool] = input ? input.split(/\s+/).map(Number) : [];

@@ -248,6 +248,95 @@ test('live failure without a final answer remains visible and native pending sta
   } finally { adapter.dispose(true); }
 });
 
+test('off/on is immediate, idempotent and does not stack wrappers or components over 50 cycles', () => {
+  const { mode, counters } = host();
+  const before = descriptors();
+  const adapter = installAdapter();
+  try {
+    const messages = [user('switch-user'), assistant([call('a')], 'toolUse'), result('a'),
+      assistant([{ type: 'text', text: 'switch-answer' }])];
+    const saved = structuredClone(messages);
+    mode.renderSessionItems(messages);
+    adapter.toggle(0, 0);
+    assert.match(text(mode.chatContainer), /saved-output-a/);
+    const canonical = [...mode.chatContainer.children];
+    const view = adapter.views[0];
+    const wrapped = descriptors();
+    for (let i = 0; i < 50; i++) {
+      assert.equal(adapter.setEnabled(false), true);
+      assert.equal(adapter.enabled, false);
+      assert.match(text(mode.chatContainer), /saved-output-a/);
+      assert.doesNotMatch(text(mode.chatContainer), /Process ·/);
+      assert.equal(view.rows.size, 0);
+      const calls = counters.renderCall;
+      adapter.setEnabled(false);
+      assert.equal(counters.renderCall, calls, 'repeated off must not hydrate again');
+      assert.equal(adapter.toggle(), false, 'fold shortcuts do not operate on the hidden projection');
+      assert.equal(adapter.setEnabled(true), true);
+      assert.equal(adapter.enabled, true);
+      assert.match(text(mode.chatContainer), /Process · 1 tools/);
+      assert.match(text(mode.chatContainer), /switch-answer/);
+      assert.doesNotMatch(text(mode.chatContainer), /saved-output-a/);
+      assert.equal(counters.renderCall, calls, 'on must not invoke hidden native tool renderers');
+      adapter.setEnabled(true);
+      assert.deepEqual(descriptors(), wrapped);
+      assert.equal(adapter.views.length, 1);
+      assert.equal(adapter.views[0], view);
+      assert.equal(mode.chatContainer.children.length, canonical.length);
+      canonical.forEach((child, index) => assert.equal(mode.chatContainer.children[index], child));
+    }
+    assert.deepEqual(messages, saved);
+  } finally { adapter.dispose(true); }
+  assertRestored(before);
+  assert.equal(adapter.setEnabled(true), false, 'disposed adapters cannot be re-enabled');
+});
+
+test('switching during tools and streaming text preserves native execution and latest folded state', async () => {
+  const { mode, counters } = host();
+  const adapter = installAdapter();
+  try {
+    await mode.handleEvent({ type: 'agent_start' });
+    await mode.handleEvent({ type: 'message_start', message: user('live-switch-user') });
+    await mode.handleEvent({ type: 'message_start', message: assistant([]) });
+    const planning = assistant([call('live')], 'toolUse');
+    await mode.handleEvent({ type: 'message_update', message: planning });
+    await mode.handleEvent({ type: 'message_end', message: planning });
+    const pending = mode.pendingTools;
+    const native = pending.get('live');
+    adapter.setEnabled(false);
+    await mode.handleEvent({ type: 'tool_execution_start', toolCallId: 'live', toolName: 'probe', args: call('live').arguments });
+    await mode.handleEvent({ type: 'tool_execution_update', toolCallId: 'live', partialResult: result('progress') });
+    assert.match(text(mode.chatContainer), /saved-output-progress/);
+    adapter.setEnabled(true);
+    assert.equal(mode.pendingTools, pending);
+    assert.equal(pending.get('live'), native);
+    const calls = counters.renderCall;
+    const failed = result('live', true);
+    await mode.handleEvent({ type: 'tool_execution_end', toolCallId: 'live', result: failed, isError: true });
+    await mode.handleEvent({ type: 'message_end', message: failed });
+    assert.equal(pending.size, 0);
+    assert.match(text(mode.chatContainer), /1 failed/);
+    assert.doesNotMatch(text(mode.chatContainer), /saved-output/);
+    assert.equal(counters.renderCall, calls);
+    await mode.handleEvent({ type: 'message_start', message: assistant([]) });
+    await mode.handleEvent({ type: 'message_update', message: assistant([{ type: 'text', text: 'partial' }], 'pending') });
+    assert.match(text(mode.chatContainer), /partial/);
+    const streaming = mode.streamingComponent;
+    adapter.setEnabled(false);
+    const final = assistant([{ type: 'text', text: 'partial continued while off' }]);
+    await mode.handleEvent({ type: 'message_update', message: final });
+    assert.match(text(mode.chatContainer), /partial continued while off/);
+    adapter.setEnabled(true);
+    assert.equal(mode.streamingComponent, streaming);
+    assert.match(text(mode.chatContainer), /partial continued while off/);
+    await mode.handleEvent({ type: 'message_end', message: final });
+    await mode.handleEvent({ type: 'agent_end' });
+    assert.equal(adapter.views[0].turn.running, false);
+    assert.equal(adapter.views[0].turn.failed, 1);
+    assert.equal(adapter.views[0].turn.items.filter(item => item.kind === 'assistant').length, 2);
+  } finally { adapter.dispose(true); }
+});
+
 test('version and duplicate-install guards leave original descriptors intact', () => {
   const before = descriptors();
   assert.throws(() => installAdapter('0.85.0'), /supports Pi 0.85.1 only/);

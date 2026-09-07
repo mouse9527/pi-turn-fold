@@ -99,6 +99,9 @@ with tempfile.TemporaryDirectory(prefix='pi-turn-fold-smoke-') as directory:
         until('SAVED-TOOL-OUTPUT')
         command('/fold off')
         until('Native transcript restored', seconds=30)
+        command('/fold on')
+        enabled = until('Folding enabled.', seconds=30)
+        assert '150 tools' in enabled and 'SYNTHETIC-MIDDLE-MESSAGE' in enabled
         command('/reload')
         reloaded = until('Reloaded keybindings', seconds=30)
         assert '150 tools' in reloaded and 'SYNTHETIC-MIDDLE-MESSAGE' in reloaded
@@ -112,7 +115,7 @@ with tempfile.TemporaryDirectory(prefix='pi-turn-fold-smoke-') as directory:
                     break
         process.wait(timeout=3)
         assert process.returncode == 0, process.returncode
-        print('PASS: bundled host identity, segmented restore with visible middle text, two-level expansion, off, reload, quit (300 synthetic calls).')
+        print('PASS: bundled host identity, segmented restore with visible middle text, two-level expansion, off/on without reload, reload, quit (300 synthetic calls).')
     finally:
         if process.poll() is None:
             process.terminate()

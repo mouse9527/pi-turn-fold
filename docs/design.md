@@ -22,7 +22,7 @@ Independent native detail components are constructed only when the user opens an
 
 The canonical chat remains flat and in native order. The adapter projects user messages, lightweight turn anchors, and native notices into a second `Container`. Hidden native tools and assistants are absent from that visible tree, not rendered and then erased.
 
-Both `render` and `handleMouse` delegate to that same tree, so mouse offsets use real component layout. Only process/item header clicks are consumed. Wheel input, selection and editor focus retain native routing.
+While enabled, both `render` and `handleMouse` delegate to that same projected tree; while disabled, both use the native canonical tree. Mouse offsets always use the layout being displayed. Only process/item header clicks are consumed. Wheel input, selection and editor focus retain native routing.
 
 Native custom entries occasionally insert directly into `chatContainer.children`. The adapter reconciles that rare insertion path explicitly; ordinary streaming events do not rescan the canonical tree.
 
@@ -46,11 +46,13 @@ A historical `edit` renderer must not call `computeEditsDiff` against the curren
 
 `write` has no historical before-image by default. Its written content is shown with an explicit notice, never labeled as a reconstructed before/after diff.
 
-## Restoration
+## Live switching and teardown
 
-Each runtime and instance method wrapper keeps its previous descriptor. Disposal restores only slots still owned by this adapter; it never overwrites a later extension's wrapper. The duplicate-install marker prevents stacking this adapter with itself.
+`/fold off` switches layout and mouse dispatch to the native transcript and bypasses presentation gates. It hydrates canonical native components once and closes/releases open plugin detail rows. Historical edit previews are disabled during that hydration. The lightweight turn/group event state continues tracking; no polling or periodic work is added.
 
-`/fold off` restores methods, removes the invisible anchors, hydrates canonical native display components, and releases projection/detail references. Historical edit previews are disabled during that hydration. Lifecycle shutdown releases resources without requesting a render after terminal shutdown. Reload reconstructs the display via Pi's ordinary path.
+`/fold on` switches back to the current projection and invalidates its display caches. It does not replay agent events, reset pending tools, alter the streaming component, re-register hooks, or reload other extensions. Both operations are idempotent and supported mid-stream. Native caches populated while off can remain in memory afterward; off/on is not a substitute for a fresh-process no-extension baseline. Switches are session-runtime state, not persisted configuration.
+
+Full disposal is separate: every method wrapper keeps its previous descriptor. Disposal restores only slots still owned by this adapter, removes its anchors and releases projection references; it never overwrites a later extension's wrapper. The duplicate-install marker prevents stacking this adapter with itself. Lifecycle shutdown disposes without requesting a render after terminal shutdown. Reload reconstructs the display via Pi's ordinary path and defaults to enabled.
 
 An extension that wraps our functions later can keep a reference to our old closure; arbitrary monkey-patch composition cannot be made reliable. The supported environment has no other transcript renderer, and restarting remains the safest recovery for unknown conflicts.
 
@@ -75,6 +77,6 @@ Use a session copy and a fresh Pi process with only this extension:
 4. Resize and change theme with closed/open items; verify correct mouse targets and readable output.
 5. Exercise abort, tool failure, model error, length limit, permission UI, new/resume/fork/tree and compaction.
 6. Measure idle CPU, input-to-paint p95 and heap growth before/after 50 switches.
-7. Disable and reload, or restart without the extension, and verify native behavior and unchanged saved data.
+7. Use `/fold off` then `/fold on` while idle and while streaming; verify current text/tool state and unchanged saved data. Separately disable the package and reload, or restart without it, to check full teardown.
 
 Do not promote component benchmark timings to a “never lags” guarantee.
