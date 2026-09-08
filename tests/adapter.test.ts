@@ -32,6 +32,9 @@ const supervisorRequest = (id: string, reason: 'progress_update' | 'need_decisio
 });
 const controlNotice = (reason: string) => ({ role: 'custom', customType: 'subagent_control_notice',
   content: `control-notice-${reason}`, display: true, timestamp: 4, details: { event: { reason } } });
+const supervisorReply = (id: string) => ({ type: 'custom', id: `entry-${id}`, parentId: null,
+  timestamp: new Date(0).toISOString(), customType: 'subagent_supervisor_reply',
+  data: { requestId: id, runId: 'run-1', agent: 'worker', childIndex: 0, message: `supervisor-reply-${id}`, createdAt: 1 } });
 const custom = (customType: string, content: string) => ({ role: 'custom', customType, content, display: true, timestamp: 4 });
 
 // Keep all display/control methods on the actual installed prototype. Only dependencies are stubbed.
@@ -55,7 +58,10 @@ function host() {
         : name === 'subagent_supervisor_request' || name === 'subagent_control_notice'
           ? (message: any, options: any) => new Text(`supervisor-native-${options.expanded ? 'expanded' : 'collapsed'}:${message.content}`, 0, 0)
           : undefined,
-      getEntryRenderer: (name: string) => name === 'test-entry' ? () => new Text('custom-entry-visible', 0, 0) : undefined },
+      getEntryRenderer: (name: string) => name === 'test-entry' ? () => new Text('custom-entry-visible', 0, 0)
+        : name === 'subagent_supervisor_reply'
+          ? (entry: any, options: any) => new Text(`reply-native-${options.expanded ? 'expanded' : 'collapsed'}:${entry.data.message}`, 0, 0)
+          : undefined },
     getToolDefinition: () => definition, getSteeringMessages: () => [], getFollowUpMessages: () => [], retryAttempt: 0,
   };
   const mode = Object.assign(Object.create(InteractiveMode.prototype), {
@@ -318,20 +324,22 @@ test('official supervisor requests fold by exact type without mutating communica
     const update = supervisorRequest('update', 'progress_update');
     const alert = controlNotice('supervisor_request');
     const decision = supervisorRequest('decision', 'need_decision');
-    const saved = structuredClone([update, alert, decision]);
+    const reply = supervisorReply('decision');
+    const saved = structuredClone([update, alert, decision, reply]);
     mode.addMessageToChat(update);
     mode.addMessageToChat(alert);
     mode.addMessageToChat(decision);
+    mode.addCustomEntryToChat(reply);
     mode.addMessageToChat(controlNotice('active_long_running'));
     mode.addMessageToChat(custom('subagent_supervisor_request_extra', 'supervisor-lookalike-visible'));
     const canonical = mode.chatContainer.children.filter((child: any) =>
       child instanceof CustomMessageComponent && (child as any).message?.customType === 'subagent_supervisor_request') as CustomMessageComponent[];
     assert.equal(canonical.length, 2);
     let lines = mode.chatContainer.render(100).map(stripVTControlCharacters);
-    assert.match(lines.join('\n'), /Attention · Supervisor 1 update · 1 alert · 1 decision/);
+    assert.match(lines.join('\n'), /Attention · Supervisor 1 update · 1 alert · 1 decision · 1 reply/);
     assert.match(lines.join('\n'), /control-notice-active_long_running/);
     assert.match(lines.join('\n'), /supervisor-lookalike-visible/);
-    assert.doesNotMatch(lines.join('\n'), /supervisor-request-(?:update|decision)|control-notice-supervisor_request/);
+    assert.doesNotMatch(lines.join('\n'), /supervisor-request-(?:update|decision)|control-notice-supervisor_request|supervisor-reply-decision/);
     const headerY = lines.findIndex((line: string) => line.includes('Supervisor 1 update'));
     assert.ok(mode.chatContainer.handleMouse({ type: 'click', button: 'left', x: 1, y: headerY, screenX: 1, screenY: headerY,
       width: 100, height: lines.length, shift: false, ctrl: false, alt: false })?.handled);
@@ -339,7 +347,8 @@ test('official supervisor requests fold by exact type without mutating communica
     assert.match(lines.join('\n'), /supervisor-native-expanded:supervisor-request-update/);
     assert.match(lines.join('\n'), /supervisor-native-expanded:control-notice-supervisor_request/);
     assert.match(lines.join('\n'), /supervisor-native-expanded:supervisor-request-decision/);
-    assert.deepEqual([update, alert, decision], saved, 'display folding never changes request IDs or reply metadata');
+    assert.match(lines.join('\n'), /reply-native-expanded:supervisor-reply-decision/);
+    assert.deepEqual([update, alert, decision, reply], saved, 'display folding never changes request IDs or reply metadata');
     assert.ok(canonical.every(component => (component as any)._expanded === false));
     adapter.setEnabled(false);
     assert.match(text(mode.chatContainer), /supervisor-native-collapsed:supervisor-request-decision/);
