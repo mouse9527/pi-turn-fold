@@ -9,7 +9,7 @@ const knownTools = new Map<string, [Category, string]>([
   ['edit', ['Edit', 'edit']], ['write', ['Edit', 'write']],
   ['Agent', ['Subagent', 'agent']], ['SubagentWorkflow', ['Subagent', 'workflow']],
   ['get_subagent_result', ['Subagent', 'result']], ['steer_subagent', ['Subagent', 'steer']],
-  ['subagent', ['Subagent', 'agent']],
+  ['subagent', ['Subagent', 'agent']], ['subagent_supervisor', ['Subagent', 'supervisor']],
 ]);
 export const statusSymbol = { pending: '○', running: '…', done: '✓', error: '✗' } as const;
 export const statusColor = { pending: 'muted', running: 'warning', done: 'success', error: 'error' } as const;
@@ -23,9 +23,9 @@ export function compact(value: string, limit = 160): string {
 export function toolCategory(tool: Tool): Category { return knownTools.get(tool.name)?.[0] ?? 'Other'; }
 export function toolAction(tool: Tool): string {
   if (tool.name === 'Agent' && typeof tool.args.resume === 'string' && tool.args.resume) return 'resume';
-  if (tool.name === 'subagent') {
+  if (tool.name === 'subagent' || tool.name === 'subagent_supervisor') {
     if (typeof tool.args.action === 'string' && tool.args.action) return compact(tool.args.action);
-    if (tool.args.workflowScript || tool.args.workflowScriptPath || tool.args.workflow) return 'workflow';
+    if (tool.name === 'subagent' && (tool.args.workflowScript || tool.args.workflowScriptPath || tool.args.workflow)) return 'workflow';
   }
   return knownTools.get(tool.name)?.[1] ?? compact(tool.name);
 }
@@ -34,6 +34,7 @@ export function toolTarget(tool: Tool): string {
     : tool.name === 'SubagentWorkflow' ? [tool.args.name, tool.args.title, tool.args.scriptPath]
     : tool.name === 'get_subagent_result' || tool.name === 'steer_subagent' ? [tool.args.agent_id]
     : tool.name === 'subagent' ? [tool.args.agent, tool.args.id, tool.args.name, tool.args.topic, tool.args.workflowScriptPath]
+    : tool.name === 'subagent_supervisor' ? [tool.args.replyTo, tool.args.to]
     : [tool.args.path, tool.args.file_path, tool.args.command, tool.args.query];
   const value = values.find(value => typeof value === 'string' && value);
   return typeof value === 'string' ? compact(value) : '';

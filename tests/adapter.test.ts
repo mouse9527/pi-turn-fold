@@ -336,7 +336,7 @@ test('official supervisor requests fold by exact type without mutating communica
       child instanceof CustomMessageComponent && (child as any).message?.customType === 'subagent_supervisor_request') as CustomMessageComponent[];
     assert.equal(canonical.length, 2);
     let lines = mode.chatContainer.render(100).map(stripVTControlCharacters);
-    assert.match(lines.join('\n'), /Attention · Supervisor 1 update · 1 alert · 1 decision · 1 reply/);
+    assert.match(lines.join('\n'), /Attention · Supervisor 1 update · 1 alert · 1 reply/);
     assert.match(lines.join('\n'), /control-notice-active_long_running/);
     assert.match(lines.join('\n'), /supervisor-lookalike-visible/);
     assert.doesNotMatch(lines.join('\n'), /supervisor-request-(?:update|decision)|control-notice-supervisor_request|supervisor-reply-decision/);
@@ -353,6 +353,13 @@ test('official supervisor requests fold by exact type without mutating communica
     adapter.setEnabled(false);
     assert.match(text(mode.chatContainer), /supervisor-native-collapsed:supervisor-request-decision/);
     adapter.setEnabled(true);
+    mode.chatContainer.clear();
+    const resolvedReply = { ...supervisorReply('resolved'), data: { ...supervisorReply('resolved').data, runId: 'resolved-run', createdAt: 2 } };
+    const resolvedAlert = { ...controlNotice('supervisor_request'), details: { event: { reason: 'supervisor_request', runId: 'resolved-run', ts: 1 } } };
+    mode.addCustomEntryToChat(resolvedReply);
+    mode.addMessageToChat(resolvedAlert);
+    assert.match(text(mode.chatContainer), /Process · Supervisor 1 reply/);
+    assert.doesNotMatch(text(mode.chatContainer), /Attention · Supervisor|1 alert/);
     mode.chatContainer.clear();
     mode.renderSessionItems([supervisorRequest('history', 'progress_update')]);
     assert.match(text(mode.chatContainer), /Process · Supervisor 1 update/);

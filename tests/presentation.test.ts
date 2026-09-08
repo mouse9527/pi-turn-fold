@@ -63,6 +63,8 @@ test('exact subagent tools share one category while actions and bounded targets 
     ['subagent', { workflowScript: hugePrompt }, 'workflow', ''],
     ['subagent', { workflowScriptPath: '/tmp/review.js' }, 'workflow', '/tmp/review.js'],
     ['subagent', { action: 'steer', id: 'run-456', message: hugeMessage }, 'steer', 'run-456'],
+    ['subagent_supervisor', { action: 'pending' }, 'pending', ''],
+    ['subagent_supervisor', { action: 'reply', replyTo: 'request-789', message: hugeMessage }, 'reply', 'request-789'],
   ] as const;
   for (const [index, [name, args, action, target]] of cases.entries()) {
     const tool = turn.tool(String(index), name, args);
@@ -79,7 +81,17 @@ test('exact subagent tools share one category while actions and bounded targets 
     assert.equal(toolCategory(tool), 'Other');
   }
   const group = turn.groupOf.get(turn.tools.get('0')!)!;
-  assert.equal(group.summary(false), 'Unfinished · Subagent 10 · Other 6 · 6 unfinished');
+  assert.equal(group.summary(false), 'Unfinished · Subagent 12 · Other 6 · 6 unfinished');
+});
+
+test('failed groups keep only the diagnostic line red', () => {
+  const turn = new Turn();
+  const tool = turn.tool('failed', 'read', { path: 'broken.ts' });
+  turn.result(tool, { content: [], isError: true, details: { error: 'permission denied' } });
+  const view = new TurnView(turn, { ...host, color: (name, value) => `<${name}>${value}</${name}>` });
+  const rendered = view.render(100).join('\n');
+  assert.match(rendered, /<warning>▸ Failed · Read 1 · 1 failed<\/warning>/);
+  assert.match(rendered, /<error>  Failed: permission denied · read broken.ts<\/error>/);
 });
 
 test('pending, parallel starts, out-of-order and corrected results maintain current operation and failure maps', () => {

@@ -161,12 +161,14 @@ class ProcessView extends Container {
     this.clear();
     this.addChild(new Spacer(1));
     const header = new Container();
-    const style = (text: string) => this.host.color?.(statusColor[this.group.status(this.turn.running)], text) ?? text;
-    header.addChild(line(() => `${this.open ? '▾' : '▸'} ${this.group.summary(this.turn.running)}`, style));
+    const status = this.group.status(this.turn.running);
+    const headerStyle = (text: string) => this.host.color?.(statusColor[status === 'error' ? 'running' : status], text) ?? text;
+    const activityStyle = (text: string) => this.host.color?.(statusColor[status], text) ?? text;
+    header.addChild(line(() => `${this.open ? '▾' : '▸'} ${this.group.summary(this.turn.running)}`, headerStyle));
     header.addChild(line(() => {
       const activity = this.group.activity(this.turn.running);
       return activity ? `  ${activity}` : '';
-    }, style, true));
+    }, activityStyle, true));
     this.addChild(new MouseRegion(header, event => {
       if (event.type !== 'click' || event.button !== 'left') return;
       this.toggle();
