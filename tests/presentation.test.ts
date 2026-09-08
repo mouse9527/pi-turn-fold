@@ -44,7 +44,7 @@ test('pending, parallel starts, out-of-order and corrected results maintain curr
   turn.result(b, success, true);
   assert.equal(group.activity(turn.running), 'Running: read a.ts', 'partial updates do not reorder starts');
   turn.result(a, success);
-  assert.equal(group.activity(turn.running), 'Running: bash npm test');
+  assert.equal(group.activity(turn.running), 'Running: bash');
   const failure = { content: [{ type: 'text', text: 'very detailed output\nCommand exited with code 1' }], isError: true };
   turn.result(b, failure);
   turn.result(b, failure);
@@ -63,9 +63,54 @@ test('pending, parallel starts, out-of-order and corrected results maintain curr
   turn.finish();
   assert.equal(group.summary(false), 'Unfinished · Read 1 · Run 1 · 1 unfinished');
   assert.equal(group.runningTools.size, 1);
-  assert.equal(group.activity(turn.running), 'Unfinished: bash npm test');
+  assert.equal(group.activity(turn.running), 'Unfinished: bash');
   assert.equal(b.status, 'running', 'finish does not invent a result or failure');
   assert.equal(b.result?.isError, false);
+});
+
+for (const name of ['bash', 'powershell']) test(`${name} activity omits megabyte streamed commands while expanded details retain them`, () => {
+  const turn = new Turn();
+  turn.running = true;
+  const tool = turn.tool('shell', name, {});
+  const group = turn.groupOf.get(tool)!;
+  const view = new TurnView(turn, host);
+  const command = 'COMMAND-MARKER first line\n' + 'x'.repeat(1_000_000) + '\nCOMMAND-TAIL';
+  const output: Result = { content: [{ type: 'text', text: 'OUTPUT-MARKER' }], isError: false };
+  const frame = () => view.render(120).map(stripVTControlCharacters).join('\n');
+  const closed = () => assert.doesNotMatch(frame(), /COMMAND-MARKER|COMMAND-TAIL|OUTPUT-MARKER/);
+  try {
+    closed();
+    for (const end of [14, 30, command.length]) {
+      turn.tool(tool.id, name, { command: command.slice(0, end) });
+      closed(); // Partial arguments before execution starts.
+    }
+    turn.startTool(tool, tool.args);
+    for (const end of [14, 30, command.length]) {
+      turn.tool(tool.id, name, { command: command.slice(0, end) });
+      turn.result(tool, output, true);
+      assert.equal(group.activity(true), `Running: ${name}`);
+      assert.match(frame(), new RegExp(`Running: ${name}(?:\\n|$)`));
+      closed();
+    }
+    turn.finish();
+    assert.equal(group.activity(false), `Unfinished: ${name}`);
+    assert.match(frame(), new RegExp(`Unfinished: ${name}(?:\\n|$)`));
+    closed();
+    view.toggle();
+    assert.match(frame(), new RegExp(`${name} COMMAND-MARKER first line`));
+    assert.doesNotMatch(frame(), /COMMAND-TAIL|OUTPUT-MARKER/);
+    view.toggleTool(0);
+    const expanded = frame();
+    assert.match(expanded, /COMMAND-MARKER/);
+    assert.match(expanded, /COMMAND-TAIL/);
+    assert.match(expanded, /OUTPUT-MARKER/);
+    assert.equal(tool.args.command, command);
+    assert.equal(tool.result, output);
+    view.toggle();
+    closed();
+    turn.result(tool, { content: [], isError: true, details: { exitCode: 2 } });
+    assert.equal(group.activity(false), `Failed: exit code 2 · ${name} COMMAND-MARKER first line`);
+  } finally { view.dispose(); }
 });
 
 test('failure identity follows its bounded reason, with parallel and stopped activity on one line', () => {

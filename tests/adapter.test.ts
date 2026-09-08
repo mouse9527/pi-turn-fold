@@ -2,7 +2,8 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { stripVTControlCharacters } from 'node:util';
 import { InteractiveMode, AssistantMessageComponent, ToolExecutionComponent, VERSION, initTheme, createBashToolDefinition } from '@earendil-works/pi-coding-agent';
-import { Container, Text } from '@earendil-works/pi-tui';
+import { Container, Text, TuiMainScreen } from '@earendil-works/pi-tui';
+import { createInteractiveTuiReference } from '../node_modules/@earendil-works/pi-coding-agent/dist/modes/interactive/tui-renderer.js';
 import { installAdapter } from '../src/adapter.ts';
 import type { AssistantMessage } from '../src/turns.ts';
 
@@ -367,7 +368,8 @@ test('native bash elapsed timer is cleared when folding resumes, without stoppin
     assert.equal(mode.pendingTools.get('shell'), native);
     assert.equal(native.executionStarted, true);
     assert.equal(native.isPartial, true);
-    assert.match(text(mode.chatContainer), /Running: bash never executed/);
+    assert.match(text(mode.chatContainer), /Running: bash(?:\n|$)/);
+    assert.doesNotMatch(text(mode.chatContainer), /never executed/);
     adapter.setEnabled(false);
     const resumed = native.rendererState.interval;
     assert.ok(resumed, 'native display may resume its own timer while off');
@@ -386,6 +388,149 @@ test('native bash elapsed timer is cleared when folding resumes, without stoppin
     adapter.dispose(true);
     if (native?.rendererState.interval) clearInterval(native.rendererState.interval);
   }
+});
+
+test('every interleaved streaming frame hides native shells, not assistant prose or the bounded activity line', async t => {
+  const { mode, counters } = host();
+  const frames: { site: string; folded: boolean; value: string }[] = [];
+  let adapter: ReturnType<typeof installAdapter> | undefined;
+  const paint = (site: string) => frames.push({ site, folded: adapter?.enabled ?? false, value: text(mode.chatContainer) });
+  // Real Pi stable facade and requestRender scheduler; no terminal, execution or model I/O.
+  const renderer = new TuiMainScreen(mode.ui.terminal) as any;
+  renderer.stopped = false;
+  t.mock.method(renderer, 'doRender', () => paint('scheduled'));
+  const requestRender = renderer.requestRender;
+  t.mock.method(renderer, 'requestRender', function(this: any, force?: boolean) {
+    paint('requestRender-before-eventState');
+    return requestRender.call(this, force);
+  });
+  mode.ui = createInteractiveTuiReference(() => renderer);
+  const addChild = mode.chatContainer.addChild;
+  t.mock.method(mode.chatContainer, 'addChild', function(this: Container, child: any) {
+    addChild.call(this, child);
+    paint('addChild-before-hidden-registration');
+  });
+  adapter = installAdapter();
+  const updateDisplay = (ToolExecutionComponent.prototype as any).updateDisplay;
+  (ToolExecutionComponent.prototype as any).updateDisplay = function(this: any) {
+    const constructing = !mode.chatContainer.children.includes(this);
+    assert.equal(this.ui, mode.ui, 'native construction receives the stable facade, not its current renderer');
+    updateDisplay.call(this);
+    paint(constructing ? 'constructor-before-addChild' : 'updateDisplay');
+  };
+  const send = async (event: any) => {
+    const pending = mode.handleEvent(event);
+    paint('handleEvent-before-await');
+    await pending;
+    await new Promise<void>(resolve => setImmediate(resolve));
+    paint('handleEvent-after-await');
+  };
+  try {
+    await send({ type: 'agent_start' });
+    await send({ type: 'message_start', message: user('synthetic-frame-user') });
+    await send({ type: 'message_start', message: assistant([]) });
+    const prose = { type: 'text' as const, text: 'Visible prose: {"toolCall":"literal-example"}' };
+    await send({ type: 'message_update', message: assistant([prose], 'pending') });
+    assert.match(text(mode.chatContainer), /literal-example/);
+    let planning = assistant([prose, { ...call('frames'), arguments: {} }], 'pending');
+    await send({ type: 'message_update', message: planning });
+    const native = mode.pendingTools.get('frames');
+    assert.equal(native.argsComplete, false);
+    const args = { query: 'INTENTIONAL-FIRST-LINE\nRAW-ARGUMENT-TAIL' };
+    planning = assistant([prose, { ...call('frames'), arguments: args }], 'pending');
+    await send({ type: 'message_update', message: planning });
+    assert.doesNotMatch(text(mode.chatContainer), /INTENTIONAL-FIRST-LINE/, 'pending tools do not have a running summary');
+    mode.chatContainer.invalidate();
+    renderer.requestRender(true);
+    await send({ type: 'message_end', message: { ...planning, stopReason: 'toolUse' } });
+    assert.equal(native.argsComplete, true);
+    await send({ type: 'tool_execution_start', toolCallId: 'frames', toolName: 'probe', args });
+    assert.match(text(mode.chatContainer), /Running: probe INTENTIONAL-FIRST-LINE/);
+    await send({ type: 'tool_execution_update', toolCallId: 'frames', partialResult: result('RAW-PARTIAL') });
+    assert.deepEqual([counters.renderCall, counters.renderResult], [0, 0], 'even constructor-time renderers were gated');
+    adapter.setEnabled(false);
+    assert.match(text(mode.chatContainer), /native-probe-call/);
+    assert.match(text(mode.chatContainer), /saved-output-RAW-PARTIAL/);
+    adapter.setEnabled(true);
+    native.invalidate(); // A stale renderer callback after folding resumes is gated too.
+    mode.chatContainer.invalidate();
+    const completed = { ...result('frames'), content: result('RAW-FINAL').content };
+    await send({ type: 'tool_execution_end', toolCallId: 'frames', result: completed, isError: false });
+    await send({ type: 'message_end', message: completed });
+    await send({ type: 'message_start', message: assistant([]) });
+    await send({ type: 'message_update', message: assistant([{ type: 'text', text: 'Visible final stream' }], 'pending') });
+    assert.match(text(mode.chatContainer), /Visible final stream/);
+    // Exercise the constructor fallback without a preceding message_update/toolCall block.
+    await send({ type: 'tool_execution_start', toolCallId: 'fallback', toolName: 'probe', args: { query: 'fallback\nRAW-ARGUMENT-TAIL' } });
+    await send({ type: 'tool_execution_end', toolCallId: 'fallback', result: result('RAW-FALLBACK'), isError: false });
+    await send({ type: 'agent_end' });
+    renderer.renderNow(true);
+    // Exercise the real throttled timer in addition to forced/nextTick renders.
+    renderer.requestRender();
+    await new Promise(resolve => setTimeout(resolve, 25));
+    for (const frame of frames.filter(frame => frame.folded)) {
+      assert.doesNotMatch(frame.value, /native-probe-call|RAW-ARGUMENT-TAIL|saved-output-RAW/, frame.site);
+    }
+    for (const site of ['constructor-before-addChild', 'addChild-before-hidden-registration', 'requestRender-before-eventState', 'scheduled']) {
+      assert.ok(frames.some(frame => frame.folded && frame.site === site), site);
+    }
+    assert.match(text(mode.chatContainer), /literal-example/);
+    assert.equal(mode.pendingTools.size, 0);
+  } finally {
+    (ToolExecutionComponent.prototype as any).updateDisplay = updateDisplay;
+    adapter.dispose(true);
+    renderer.stopped = true;
+    renderer.cancelRenderTimer();
+  }
+  assert.match(text(mode.chatContainer), /native-probe-call/);
+  assert.match(text(mode.chatContainer), /saved-output-RAW-FINAL/);
+});
+
+for (const name of ['bash', 'powershell']) test(`${name} closed frames omit arguments across argument streaming and execution phases`, async () => {
+  const { mode } = host();
+  const adapter = installAdapter();
+  const frames: { phase: string; value: string }[] = [];
+  const paint = (phase: string) => frames.push({ phase, value: text(mode.chatContainer) });
+  const send = async (phase: string, event: any) => {
+    const pending = mode.handleEvent(event);
+    paint(`${phase}: before await`);
+    await pending;
+    paint(`${phase}: after await`);
+  };
+  const command = 'COMMAND-MARKER\n' + 'x'.repeat(1_000_000) + '\nCOMMAND-TAIL';
+  const planning = (args: Record<string, unknown>) => assistant([
+    { type: 'text', text: 'STREAMING-PROSE' },
+    { type: 'toolCall', id: 'shell', name, arguments: args },
+  ], 'pending');
+  try {
+    await send('agent start', { type: 'agent_start' });
+    await send('user', { type: 'message_start', message: user('phase coverage') });
+    await send('assistant start', { type: 'message_start', message: assistant([]) });
+    for (const end of [14, 30, command.length]) {
+      const message = planning({ command: command.slice(0, end) });
+      await send('toolcall_delta / argsComplete=false', { type: 'message_update', message,
+        assistantMessageEvent: { type: 'toolcall_delta', contentIndex: 1, delta: '', partial: message } });
+      assert.equal(mode.pendingTools.get('shell').argsComplete, false);
+      assert.doesNotMatch(text(mode.chatContainer), /Running:/);
+    }
+    await send('message_end / argsComplete=true', { type: 'message_end', message: { ...planning({ command }), stopReason: 'toolUse' } });
+    assert.equal(mode.pendingTools.get('shell').argsComplete, true);
+    assert.doesNotMatch(text(mode.chatContainer), /Running:/);
+    await send('tool_execution_start', { type: 'tool_execution_start', toolCallId: 'shell', toolName: name, args: { command } });
+    assert.match(text(mode.chatContainer), new RegExp(`Running: ${name}(?:\\n|$)`));
+    const output = { content: [{ type: 'text', text: 'OUTPUT-MARKER' }], isError: false };
+    await send('tool_execution_update', { type: 'tool_execution_update', toolCallId: 'shell', partialResult: output });
+    adapter.setEnabled(false);
+    adapter.setEnabled(true);
+    paint('folding re-enabled during execution');
+    assert.match(text(mode.chatContainer), new RegExp(`Running: ${name}(?:\\n|$)`));
+    await send('tool_execution_end', { type: 'tool_execution_end', toolCallId: 'shell', result: output, isError: false });
+    assert.doesNotMatch(text(mode.chatContainer), /Running:/);
+    await send('agent end', { type: 'agent_end' });
+    for (const { phase, value } of frames) assert.doesNotMatch(value, /COMMAND-MARKER|COMMAND-TAIL|OUTPUT-MARKER|native-probe-call/, phase);
+    assert.match(text(mode.chatContainer), /STREAMING-PROSE/);
+    assert.equal(adapter.views[0].turn.tools.get('shell')?.args.command, command);
+  } finally { adapter.dispose(true); }
 });
 
 test('version and duplicate-install guards leave original descriptors intact', () => {

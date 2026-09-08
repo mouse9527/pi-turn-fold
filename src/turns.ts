@@ -58,7 +58,7 @@ export class ProcessGroup {
     const failure = this.failures.values().next().value as Tool | undefined;
     // Put the failure first so a long parallel command cannot clip away its reason.
     return (failure ? `Failed: ${failure.errorSummary ?? 'tool execution failed'} · ${toolAction(failure)} ${toolTarget(failure)}`.trimEnd() : '') +
-      (current ? `${failure ? ' · ' : ''}${running ? 'Running' : 'Unfinished'}: ${toolAction(current)} ${toolTarget(current)}`.trimEnd() : '');
+      (current ? `${failure ? ' · ' : ''}${running ? 'Running' : 'Unfinished'}: ${toolAction(current)} ${current.name === 'bash' || current.name === 'powershell' ? '' : toolTarget(current)}`.trimEnd() : '');
   }
 }
 
