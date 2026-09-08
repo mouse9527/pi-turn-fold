@@ -1,15 +1,25 @@
 import type { ExtensionAPI } from '@earendil-works/pi-coding-agent';
 import { installAdapter } from '../src/adapter.ts';
+import { isRoutineMcpRefreshNotice } from '../src/notices.ts';
 import { toolLabel } from '../src/turns.ts';
 
 export default function(pi: ExtensionAPI) {
   let adapter: ReturnType<typeof installAdapter> | undefined;
+  let restoreNotify: (() => void) | undefined;
   let failure: string | undefined;
   try { adapter = installAdapter(); }
   catch (error) { failure = String(error); }
 
   pi.on('session_start', (_event, ctx) => {
+    restoreNotify?.();
+    restoreNotify = undefined;
     if (ctx.mode !== 'tui') { adapter?.dispose(); adapter = undefined; return; }
+    const originalNotify = ctx.ui.notify;
+    const filteredNotify = (message: string, type?: 'info' | 'warning' | 'error') => {
+      if (!adapter?.enabled || !isRoutineMcpRefreshNotice(message, type)) originalNotify.call(ctx.ui, message, type);
+    };
+    ctx.ui.notify = filteredNotify;
+    restoreNotify = () => { if (ctx.ui.notify === filteredNotify) ctx.ui.notify = originalNotify; };
     adapter?.setColor((name, text) => ctx.ui.theme.fg(name, text));
     const conflicts = pi.getCommands().filter(command =>
       /^(ccstyle|tool-display|compact-tools|tidy-bash|compact-transcript)$/.test(command.name));
@@ -22,7 +32,7 @@ export default function(pi: ExtensionAPI) {
     else if (!adapter?.captured) ctx.ui.notify('pi-turn-fold: host not captured yet; folding will attach on history rendering.', 'warning');
   });
 
-  pi.on('session_shutdown', () => { adapter?.dispose(); adapter = undefined; });
+  pi.on('session_shutdown', () => { restoreNotify?.(); restoreNotify = undefined; adapter?.dispose(); adapter = undefined; });
 
   pi.registerShortcut('ctrl+shift+o', {
     description: 'Expand/collapse process groups in the latest turn (pi-turn-fold)',
