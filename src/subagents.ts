@@ -4,7 +4,8 @@ import { Container, MouseRegion, Spacer, truncateToWidth, type Component, type T
 import { compact, statusColor, statusSymbol } from './presentation.ts';
 
 type NotificationStatus = 'running' | 'done' | 'error';
-type NotificationProtocol = 'tintinweb' | 'official' | 'supervisor' | 'control';
+type NotificationProtocol = 'tintinweb' | 'official' | 'supervisor' | 'control' | 'steering' | 'watchdog' | 'wait' | 'command';
+type GroupState = { summary: string; status: NotificationStatus };
 type NotificationDetails = Record<string, unknown>;
 type Host = {
   ui: TUI;
@@ -44,6 +45,43 @@ function messageProtocol(message: any): NotificationProtocol | undefined {
   if (message.customType === 'subagent_supervisor_request') return 'supervisor';
   if (message.customType === 'subagent_control_notice')
     return message.details?.event?.reason === 'supervisor_request' ? 'supervisor' : 'control';
+  if (message.customType === 'subagent_steering_notice') return 'steering';
+  if (message.customType === 'subagent_watchdog_warning') return 'watchdog';
+  if (message.customType === 'subagent-wait-subscription') return 'wait';
+  if (message.customType === 'subagent-slash-result') return 'command';
+}
+
+const plural = (count: number, word: string) => `${count} ${word}${count === 1 ? '' : 's'}`;
+
+/** Counts only exact structured fields; never parses a card's rendered text. */
+function countedState(protocol: NotificationProtocol, components: Component[]): GroupState | undefined {
+  const count = components.length;
+  const details = () => components.map(component => messageOf(component)?.details);
+  if (protocol === 'official') return { summary: `Process · Subagent notifications ${count}`, status: 'done' };
+  if (protocol === 'control') return { summary: `Attention · Subagent ${plural(count, 'alert')}`, status: 'running' };
+  if (protocol === 'steering') {
+    const recovered = details().filter(value => value?.state === 'recovered').length;
+    const failed = count - recovered;
+    const counts = [recovered && `${recovered} recovered`, failed && plural(failed, 'failure')].filter(Boolean);
+    return { summary: `${failed ? 'Attention' : 'Process'} · Subagent steering ${counts.join(' · ')}`, status: failed ? 'running' : 'done' };
+  }
+  if (protocol === 'watchdog') {
+    const blockers = details().filter(value => value?.severity === 'blocker').length;
+    const concerns = count - blockers;
+    const counts = [blockers && plural(blockers, 'blocker'), concerns && plural(concerns, 'concern')].filter(Boolean);
+    return { summary: `${blockers ? 'Blocked' : 'Attention'} · Watchdog ${counts.join(' · ')}`, status: blockers ? 'error' : 'running' };
+  }
+  if (protocol === 'wait') {
+    const completed = details().filter(value => value?.outcome === 'completed').length;
+    const attention = count - completed;
+    const counts = [completed && `${completed} completed`, attention && plural(attention, 'alert')].filter(Boolean);
+    return { summary: `${attention ? 'Attention' : 'Process'} · Subagent waits ${counts.join(' · ')}`, status: attention ? 'running' : 'done' };
+  }
+  if (protocol === 'command') {
+    const failed = details().filter(value => value?.result?.isError === true).length;
+    return { summary: `${failed ? 'Failed' : 'Process'} · Subagent ${plural(count, 'command')}${failed ? ` · ${failed} failed` : ''}`,
+      status: failed ? 'running' : 'done' };
+  }
 }
 
 export function isFoldedSubagentMessage(message: unknown): boolean {
@@ -229,14 +267,14 @@ export class SubagentGroup extends Container {
     this.clear();
   }
 
-  summary(): string {
-    if (this.protocol === 'official') return `Process · Subagent notifications ${this.components.length}`;
-    if (this.protocol === 'control') return `Attention · Subagent ${this.components.length} alert${this.components.length === 1 ? '' : 's'}`;
+  state(): GroupState {
+    const counted = countedState(this.protocol, this.components);
+    if (counted) return counted;
     if (this.protocol === 'supervisor') {
       const { updates, decisions, alerts, replies, attention } = supervisorState(this.components);
-      const counts = [updates && `${updates} update${updates === 1 ? '' : 's'}`, decisions && `${decisions} decision${decisions === 1 ? '' : 's'}`,
-        alerts && `${alerts} alert${alerts === 1 ? '' : 's'}`, replies && `${replies} repl${replies === 1 ? 'y' : 'ies'}`].filter(Boolean);
-      return `${attention ? 'Attention' : 'Process'} · Supervisor ${counts.join(' · ')}`;
+      const counts = [updates && plural(updates, 'update'), decisions && plural(decisions, 'decision'),
+        alerts && plural(alerts, 'alert'), replies && `${replies} repl${replies === 1 ? 'y' : 'ies'}`].filter(Boolean);
+      return { summary: `${attention ? 'Attention' : 'Process'} · Supervisor ${counts.join(' · ')}`, status: attention ? 'running' : 'done' };
     }
     let completed = 0, running = 0, failed = 0;
     for (const task of this.tasks) {
@@ -244,9 +282,13 @@ export class SubagentGroup extends Container {
       else if (task.status === 'error') failed++;
       else running++;
     }
-    const state = failed ? 'Failed' : running ? 'Working' : 'Process';
+    const label = failed ? 'Failed' : running ? 'Working' : 'Process';
     const counts = [completed && `${completed} completed`, running && `${running} running`, failed && `${failed} failed`].filter(Boolean);
-    return `${state} · Subagents ${counts.join(' · ')}`;
+    return { summary: `${label} · Subagents ${counts.join(' · ')}`, status: failed ? 'error' : running ? 'running' : 'done' };
+  }
+
+  summary(): string {
+    return this.state().summary;
   }
 
   private releaseRows() {
@@ -261,16 +303,14 @@ export class SubagentGroup extends Container {
     this.seen = this.version;
     this.clear();
     this.addChild(new Spacer(1));
-    const status: NotificationStatus = this.protocol === 'control' || this.protocol === 'supervisor' && supervisorState(this.components).attention
-      ? 'running' : this.tasks.some(task => task.status === 'error') ? 'error'
-      : this.tasks.some(task => task.status === 'running') ? 'running' : 'done';
+    const status = this.state().status;
     const style = (text: string) => this.host.color?.(statusColor[status], text) ?? text;
     this.addChild(new MouseRegion(line(() => `${this.open ? '▾' : '▸'} ${this.summary()}`, style), event => {
       if (event.type !== 'click' || event.button !== 'left') return;
       this.toggle();
       return { handled: true };
     }));
-    if (this.open && (this.protocol === 'official' || this.protocol === 'supervisor' || this.protocol === 'control')) for (const component of this.components) {
+    if (this.open && this.protocol !== 'tintinweb') for (const component of this.components) {
       let row = this.nativeRows.get(component);
       if (!row) { row = expandedNativeClone(component); this.nativeRows.set(component, row); }
       this.addChild(row);

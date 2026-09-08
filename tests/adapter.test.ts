@@ -55,7 +55,8 @@ function host() {
     extensionRunner: { getMarkdownTransformers: () => [],
       getMessageRenderer: (name: string) => name === 'subagent-notify'
         ? (message: any, options: any) => new Text(`official-native-${options.expanded ? 'expanded' : 'collapsed'}:${message.content}`, 0, 0)
-        : name === 'subagent_supervisor_request' || name === 'subagent_control_notice'
+        : ['subagent_supervisor_request', 'subagent_control_notice', 'subagent_steering_notice', 'subagent_watchdog_warning',
+          'subagent-wait-subscription', 'subagent-slash-result', 'subagent-slash-text-result'].includes(name)
           ? (message: any, options: any) => new Text(`supervisor-native-${options.expanded ? 'expanded' : 'collapsed'}:${message.content}`, 0, 0)
           : undefined,
       getEntryRenderer: (name: string) => name === 'test-entry' ? () => new Text('custom-entry-visible', 0, 0)
@@ -368,6 +369,39 @@ test('official supervisor requests fold by exact type without mutating communica
     mode.renderSessionItems([supervisorRequest('history', 'progress_update')]);
     assert.match(text(mode.chatContainer), /Process · Supervisor 1 update/);
     assert.doesNotMatch(text(mode.chatContainer), /supervisor-request-history/);
+  } finally { adapter.dispose(true); }
+});
+
+test('remaining official lifecycle cards fold by exact type while user-requested output stays native', () => {
+  const { mode } = host();
+  const adapter = installAdapter();
+  const lifecycle = (customType: string, id: string, details: Record<string, unknown>) =>
+    ({ role: 'custom', customType, content: `lifecycle-${id}`, display: true, timestamp: 4, details });
+  try {
+    mode.addMessageToChat(lifecycle('subagent_steering_notice', 'steer-ok', { state: 'recovered' }));
+    mode.addMessageToChat(lifecycle('subagent_steering_notice', 'steer-bad', { state: 'failed' }));
+    mode.addMessageToChat(lifecycle('subagent_watchdog_warning', 'concern', { severity: 'concern' }));
+    mode.addMessageToChat(lifecycle('subagent_watchdog_warning', 'blocker', { severity: 'blocker' }));
+    mode.addMessageToChat(lifecycle('subagent-wait-subscription', 'wait-ok', { outcome: 'completed' }));
+    mode.addMessageToChat(lifecycle('subagent-wait-subscription', 'wait-late', { outcome: 'timed out' }));
+    mode.addMessageToChat(lifecycle('subagent-slash-result', 'models', { result: { isError: false } }));
+    mode.addMessageToChat(custom('subagent-slash-text-result', 'user-requested-status-visible'));
+    mode.addMessageToChat(custom('subagents-admin', 'user-requested-admin-visible'));
+    const folded = text(mode.chatContainer);
+    assert.match(folded, /Attention · Subagent steering 1 recovered · 1 failure/);
+    assert.match(folded, /Blocked · Watchdog 1 blocker · 1 concern/);
+    assert.match(folded, /Attention · Subagent waits 1 completed · 1 alert/);
+    assert.match(folded, /Process · Subagent 1 command/);
+    assert.match(folded, /user-requested-status-visible/);
+    assert.match(folded, /user-requested-admin-visible/);
+    assert.doesNotMatch(folded, /lifecycle-/);
+    const lines = mode.chatContainer.render(100).map(stripVTControlCharacters);
+    const y = lines.findIndex((line: string) => line.includes('Subagent 1 command'));
+    assert.ok(mode.chatContainer.handleMouse({ type: 'click', button: 'left', x: 1, y, screenX: 1, screenY: y,
+      width: 100, height: lines.length, shift: false, ctrl: false, alt: false })?.handled);
+    assert.match(text(mode.chatContainer), /supervisor-native-expanded:lifecycle-models/);
+    adapter.setEnabled(false);
+    assert.match(text(mode.chatContainer), /supervisor-native-collapsed:lifecycle-blocker/);
   } finally { adapter.dispose(true); }
 });
 
