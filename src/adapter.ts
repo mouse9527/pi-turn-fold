@@ -1,7 +1,7 @@
 import { InteractiveMode, AssistantMessageComponent, ToolExecutionComponent, VERSION } from '@earendil-works/pi-coding-agent';
 import { Container, type Component } from '@earendil-works/pi-tui';
 import { Turn, type AssistantMessage, type Tool } from './turns.ts';
-import { SubagentProjection } from './subagents.ts';
+import { isFoldedSubagentMessage, SubagentProjection } from './subagents.ts';
 import { TurnView, type ViewHost } from './view.ts';
 
 // All unsupported host access is quarantined here, pinned to the tested Pi release.
@@ -236,6 +236,10 @@ export function installAdapter(version = VERSION) {
     });
     patch(proto, 'addMessageToChat', original => function(message, options) {
       capture(this);
+      if (message.role === 'custom' && isFoldedSubagentMessage(message)) {
+        current?.finish();
+        current = undefined; // Visible async notices seal the preceding display fragment.
+      }
       if (message.role === 'assistant' && !current) newTurn();
       const result = message.role === 'assistant'
         ? inScope(() => original.call(this, message, options))

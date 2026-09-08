@@ -90,7 +90,7 @@ test('inline dispatch reaches saved edit and nested native details without losin
     assert.ok(y >= 0, `missing ${label}: ${rendered.join('\n')}`);
     return view.handleMouse({ ...click(y, rendered.length, width), x: 10, screenX: 10, type });
   };
-  assert.ok(dispatch('Running: custom-agent')?.handled, 'whole activity line opens the group');
+  assert.ok(dispatch('Working · Edit 1 · Other 1')?.handled, 'group header opens while custom activity stays hidden');
   assert.ok(dispatch('✓ edit')?.handled);
   assert.match(lines().join('\n'), /Arguments[\s\S]*oldText[\s\S]*-1 before[\s\S]*\+1 after/);
   assert.equal(view.rows.get(edit)?.open, true);
@@ -109,7 +109,7 @@ test('inline dispatch reaches saved edit and nested native details without losin
     assert.equal(view.open, true);
     assert.equal(dispatch('saved child invocation', width, 'wheel'), undefined);
     assert.equal(dispatch('saved child invocation', width, 'drag'), undefined);
-    assert.equal(dispatch('Running: custom-agent', width, 'wheel'), undefined);
+    assert.equal(dispatch('Working · Edit 1 · Other 1', width, 'wheel'), undefined);
     assert.ok(dispatch('▾ saved child invocation', width)?.handled);
     assert.equal(nested?.open, false);
     assert.ok(dispatch('▸ saved child invocation', width)?.handled);
