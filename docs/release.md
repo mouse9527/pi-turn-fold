@@ -1,14 +1,15 @@
 # 发布方案：先 Git tag + GitHub Release
 
 > 首个实验预发布 [`v0.3.0-rc.1`](https://github.com/mouse9527/pi-turn-fold/releases/tag/v0.3.0-rc.1) 已发布；对应提交为 `0fcdead2d9e5b9a168395dc00ca40709f03db3fe`。发布分支与 tag CI 均通过，固定 tag 安装已验证。下文保留准备流程与后续发布方案，不应盲目重跑已执行的创建命令。
-> [`v0.3.0-rc.2`](https://github.com/mouse9527/pi-turn-fold/releases/tag/v0.3.0-rc.2) 已发布，提交 `ae9fd1113e99304c87d4ffca5251064317cab490`；[分支 CI](https://github.com/mouse9527/pi-turn-fold/actions/runs/34182180355)与 [tag CI](https://github.com/mouse9527/pi-turn-fold/actions/runs/34182257811)均通过。RC3 从已合并 PR #1 的 `main` 准备，通过手工 immutable tag 和 Release workflow 发布；公开状态以 Releases 页面为准。
+> [`v0.3.0-rc.2`](https://github.com/mouse9527/pi-turn-fold/releases/tag/v0.3.0-rc.2) 已发布，提交 `ae9fd1113e99304c87d4ffca5251064317cab490`；[分支 CI](https://github.com/mouse9527/pi-turn-fold/actions/runs/34182180355)与 [tag CI](https://github.com/mouse9527/pi-turn-fold/actions/runs/34182257811)均通过。
+> [`v0.3.0-rc.3`](https://github.com/mouse9527/pi-turn-fold/releases/tag/v0.3.0-rc.3) 已从合并后的 `main` 提交 `a9625dd00c69215f4f35c8297ca691ea16d36b8b` 发布；[main CI](https://github.com/mouse9527/pi-turn-fold/actions/runs/34194507926)、[tag CI](https://github.com/mouse9527/pi-turn-fold/actions/runs/34194597408)及首次实际运行的 [Release workflow](https://github.com/mouse9527/pi-turn-fold/actions/runs/34194697467) 均通过。
 
 ## 1. 最小方案与现状
 
 - **推荐**：Git 安装作为一等分发方式；annotated tag 固定源码，GitHub Release 提供说明、兼容性和验证证据。
 - **已有**：公开 MIT 仓库、Pi package manifest、源码 TS、lockfile，以及 `.github/workflows/ci.yml` 的 push/PR 检查。
 - CI 已配置 `npm ci --ignore-scripts`、typecheck、node:test、microbench、真实 bundled Pi CLI 的 regular/fullscreen 隔离 PTY smoke。
-- **当前**：`main` 仍是开发分支；RC1/RC2 均为实验 prerelease，未晋升为稳定 Latest。公开状态以 [GitHub Releases](https://github.com/mouse9527/pi-turn-fold/releases) 为准，历史版本号/版本提交本身不等于公开 Release。
+- **当前**：`main` 仍是开发分支；RC1/RC2/RC3 均为实验 prerelease，未晋升为稳定 Latest。公开状态以 [GitHub Releases](https://github.com/mouse9527/pi-turn-fold/releases) 为准，历史版本号/版本提交本身不等于公开 Release。
 - **未来建议，尚未实施**：`dev` 承载开发/候选，默认分支 `main` 仅接收已验证的正式发布 SHA；届时无 ref 安装才可作为稳定更新渠道。现在无 ref 得到的是最新开发源码，不宣称稳定。
 - **现已实现**：`.github/workflows/release.yml` 提供仅限手动触发的 GitHub Release；仍不创建/移动 tag、不提升版本、不改分支、不发布 npm。
 - workflow 在只读 token 下验证既有 annotated tag、package/lock 版本和 commit，再重跑完整 CI；仅独立发布 job 获得 `contents: write`。
