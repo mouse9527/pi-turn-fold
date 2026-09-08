@@ -59,20 +59,20 @@ Pi fetches source and loads TypeScript through its extension loader. No manual c
 
 ### Optional: version-locked experimental release or rollback
 
-**[v0.3.0-rc.2](https://github.com/mouse9527/pi-turn-fold/releases/tag/v0.3.0-rc.2) is a published experimental prerelease for Pi 0.85.1 only**, not a stable Latest release. Verification evidence and known limits are on [GitHub Releases](https://github.com/mouse9527/pi-turn-fold/releases). The existing [v0.3.0-rc.1 prerelease](https://github.com/mouse9527/pi-turn-fold/releases/tag/v0.3.0-rc.1) remains available. Install this fixed version directly, without a local build:
+**[v0.3.0-rc.3](https://github.com/mouse9527/pi-turn-fold/releases/tag/v0.3.0-rc.3) is the current experimental prerelease for Pi 0.85.1 only**, not a stable Latest release. Public status, verification evidence and known limits are authoritative on [GitHub Releases](https://github.com/mouse9527/pi-turn-fold/releases); previous RCs remain available. Install this fixed version directly, without a local build:
+
+```bash
+pi install git:github.com/mouse9527/pi-turn-fold@v0.3.0-rc.3
+```
+
+RC3 folds exact structured subagent completion notifications and adds bounded `Subagent` process-call statistics. It retains RC2's simplified running/unfinished shell hints. Synthetic investigations still did **not** reproduce the originally reported transient raw-card leak or confirm its root cause; these display changes are not a proven general leak fix.
+
+Version tags are immutable. Tagged installs remain version-locked: native updates do not select a newer release or switch RC2 to RC3. Explicitly install a newer published tag to change the pinned version, or choose the unpinned source above to follow development. `@latest` is not a magic GitHub Latest Release alias.
+
+To roll back to RC2:
 
 ```bash
 pi install git:github.com/mouse9527/pi-turn-fold@v0.3.0-rc.2
-```
-
-RC2 simplifies running/unfinished bash and PowerShell hints; expanded saved details are unchanged. Synthetic streaming investigations did **not** reproduce the originally reported transient raw-card leak or confirm its root cause. This is a hint simplification, not a proven leak fix.
-
-Version tags are immutable. Tagged installs remain version-locked: native updates do not select a newer release or switch RC1 to RC2. Explicitly install a newer published tag to change the pinned version, or choose the unpinned source above to follow development. `@latest` is not a magic GitHub Latest Release alias.
-
-To roll back to the existing RC1:
-
-```bash
-pi install git:github.com/mouse9527/pi-turn-fold@v0.3.0-rc.1
 # Then run /reload inside Pi, or restart.
 ```
 

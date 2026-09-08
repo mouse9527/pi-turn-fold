@@ -1,14 +1,14 @@
 # 发布方案：先 Git tag + GitHub Release
 
 > 首个实验预发布 [`v0.3.0-rc.1`](https://github.com/mouse9527/pi-turn-fold/releases/tag/v0.3.0-rc.1) 已发布；对应提交为 `0fcdead2d9e5b9a168395dc00ca40709f03db3fe`。发布分支与 tag CI 均通过，固定 tag 安装已验证。下文保留准备流程与后续发布方案，不应盲目重跑已执行的创建命令。
-> [`v0.3.0-rc.2`](https://github.com/mouse9527/pi-turn-fold/releases/tag/v0.3.0-rc.2) 已从隔离发布分支公开，提交 `ae9fd1113e99304c87d4ffca5251064317cab490`；[分支 CI](https://github.com/mouse9527/pi-turn-fold/actions/runs/34182180355)与 [tag CI](https://github.com/mouse9527/pi-turn-fold/actions/runs/34182257811)均通过。本次只发布，未更改用户安装或配置；现有 RC1 仍可用。RC2 准备基线为 `0f3d7fede7e6f3bce60a9ba47cf55f611f105604`，以下准备命令为操作记录，不应盲目重跑。
+> [`v0.3.0-rc.2`](https://github.com/mouse9527/pi-turn-fold/releases/tag/v0.3.0-rc.2) 已发布，提交 `ae9fd1113e99304c87d4ffca5251064317cab490`；[分支 CI](https://github.com/mouse9527/pi-turn-fold/actions/runs/34182180355)与 [tag CI](https://github.com/mouse9527/pi-turn-fold/actions/runs/34182257811)均通过。RC3 从已合并 PR #1 的 `main` 准备，通过手工 immutable tag 和 Release workflow 发布；公开状态以 Releases 页面为准。
 
 ## 1. 最小方案与现状
 
 - **推荐**：Git 安装作为一等分发方式；annotated tag 固定源码，GitHub Release 提供说明、兼容性和验证证据。
 - **已有**：公开 MIT 仓库、Pi package manifest、源码 TS、lockfile，以及 `.github/workflows/ci.yml` 的 push/PR 检查。
 - CI 已配置 `npm ci --ignore-scripts`、typecheck、node:test、microbench、真实 bundled Pi CLI 的 regular/fullscreen 隔离 PTY smoke。
-- **当前**：`main` 仍是开发分支；`v0.3.0-rc.1` 从隔离的 `release/v0.3.0-rc.1` 分支发布，未晋升为稳定 Latest。公开状态以 [GitHub Releases](https://github.com/mouse9527/pi-turn-fold/releases) 为准，历史版本号/版本提交本身不等于公开 Release。
+- **当前**：`main` 仍是开发分支；RC1/RC2 均为实验 prerelease，未晋升为稳定 Latest。公开状态以 [GitHub Releases](https://github.com/mouse9527/pi-turn-fold/releases) 为准，历史版本号/版本提交本身不等于公开 Release。
 - **未来建议，尚未实施**：`dev` 承载开发/候选，默认分支 `main` 仅接收已验证的正式发布 SHA；届时无 ref 安装才可作为稳定更新渠道。现在无 ref 得到的是最新开发源码，不宣称稳定。
 - **现已实现**：`.github/workflows/release.yml` 提供仅限手动触发的 GitHub Release；仍不创建/移动 tag、不提升版本、不改分支、不发布 npm。
 - workflow 在只读 token 下验证既有 annotated tag、package/lock 版本和 commit，再重跑完整 CI；仅独立发布 job 获得 `contents: write`。
@@ -17,7 +17,7 @@
 
 ## 2. 版本与状态必须分开
 
-本次准备实验候选 **`0.3.0-rc.2`**；人工验收通过后才考虑正式 **`0.3.0`**。
+本次准备实验候选 **`0.3.0-rc.3`**；人工验收通过后才考虑正式 **`0.3.0`**。
 0.x 表示接口仍可能变化；本项目约定：功能/不兼容交互或宿主支持策略变化升 minor，纯兼容修复升 patch（例如 `0.2.2`）。
 这不是宣称 SemVer 为所有 0.x 项目强制规定了同一种兼容策略。
 
@@ -59,19 +59,18 @@ optional peers 的 `*` 是 Pi 核心供给/装载声明，**不是宿主兼容�
 
 ## 4. 维护者准备与本地验证（批准后执行）
 
-本次在从上述基线创建的隔离 release 工作树执行；不要操作另一位开发者的在途工作树。
-以下准备命令针对本次 `release/v0.3.0-rc.2` 分支，RC 不进入 `main`；未来 `dev` 开发 / `main` 稳定策略尚未实施。验证无需本地构建或编译产物。
+本次候选直接从已通过 PR CI 并合入的 `main` 准备；未来 `dev` 开发 / `main` 稳定策略尚未实施。验证无需本地构建或编译产物。
 `origin` 应指向 `https://github.com/mouse9527/pi-turn-fold.git`（SSH 同仓库也可）。
 
 ```bash
 cd /path/to/clean/pi-turn-fold
 set -e
 REPO=mouse9527/pi-turn-fold
-VERSION=0.3.0-rc.2
+VERSION=0.3.0-rc.3
 TAG=v$VERSION
 git remote -v
 test -z "$(git status --porcelain)"
-test "$(git branch --show-current)" = release/v0.3.0-rc.2
+test "$(git branch --show-current)" = main
 npm version "$VERSION" --no-git-tag-version --ignore-scripts
 # 核对 package.json 与 package-lock.json 同步；人工更新 README 的实际变化/限制。
 git diff -- package.json package-lock.json README.md docs/release.md
@@ -122,7 +121,7 @@ test "$(git rev-parse "$TAG^{commit}")" = "$SHA"
 
 发布前，workflow 会在 `contents: read` job 中解析远端 annotated tag，checkout 准确 commit，核对 `package.json`、lockfile 顶层与 lock root 版本，并执行 `npm ci --ignore-scripts --no-audit --no-fund`、check、test、bench、regular/fullscreen PTY smoke。任何不一致都会阻止发布。执行仓库脚本的 job 没有写权限；通过后，独立 `contents: write` job 不 checkout、不执行项目脚本，只重新核对远端 tag object/SHA 并调用 `gh release create --verify-tag`。
 
-同一 tag 已有公开 Release 时安全跳过，不改 RC1/RC2 notes；已有 draft 时失败并要求人工审阅，不覆盖。stable 是否成为 Latest 交给 GitHub 的默认规则，避免盲目把较旧稳定版提升为 Latest。普通 push/PR 不会触发发布；本次源码变更本身也不会实际发布任何版本。无 build、二进制、npm 或私有 artifact 上传。
+同一 tag 已有公开 Release 时安全跳过，不改既有 Release notes；已有 draft 时失败并要求人工审阅，不覆盖。stable 是否成为 Latest 交给 GitHub 的默认规则，避免盲目把较旧稳定版提升为 Latest。普通 push/PR 不会触发发布；本次源码变更本身也不会实际发布任何版本。无 build、二进制、npm 或私有 artifact 上传。
 
 ## 6. 用户安装、升级与本地路径
 
@@ -135,13 +134,13 @@ pi update --extensions
 # 更新后在 Pi 内执行 /reload，或重启。
 pi list
 # 可选：锁定发布版本（tag 仅在实际推送后可用）；升版重新 install 新 tag：
-pi install git:github.com/mouse9527/pi-turn-fold@v0.3.0-rc.2
+pi install git:github.com/mouse9527/pi-turn-fold@v0.3.0-rc.3
 # 项目级安装加 -l；包命令须紧跟 pi，不写 pi --flag install ...。
 ```
 
 - 无 ref 首次 clone 使用默认分支；后续原生更新按托管 checkout 的 upstream（无 upstream 时回退远端默认分支），**不查询 GitHub Latest Release API**。Release 标记 Latest 不会改变更新目标。
 - `@latest` 只是名为 `latest` 的 Git ref，不是 GitHub Latest Release 别名；不建议维护移动 latest tag，也不新增自定义 updater。
-- immutable `@vTAG` / commit 锁定版本，不自动跳到新版本，也不会把 RC1 自动换成 RC2；需主动选择无 ref 渠道才跟随开发分支，或继续锁版并升级用 `pi install git:github.com/mouse9527/pi-turn-fold@新tag`。Git 包身份按不含 ref 的仓库 URL，重新安装新 tag 是换版本，不是另装一份。
+- immutable `@vTAG` / commit 锁定版本，不自动跳到新版本，也不会把旧 RC 自动换成新 RC；需主动选择无 ref 渠道才跟随开发分支，或继续锁版并升级用 `pi install git:github.com/mouse9527/pi-turn-fold@新tag`。Git 包身份按不含 ref 的仓库 URL，重新安装新 tag 是换版本，不是另装一份。
 - 更新检查跳过 pinned Git ref，但显式更新仍 fetch 配置的 ref 并协调 checkout；branch ref 或刻意移动的 tag 可能变化，不能泛称所有 `@ref` 永不移动。本项目版本 tag 不移动。
 - 单独 `pi update` 更新的是 **Pi 本身**，不是扩展；`--all` 还会升级宿主，可能触发 0.85.1 guard，勿作为本插件推荐升级步骤。
 - 本地源 `pi install /absolute/path/to/pi-turn-fold` 不复制文件；相对路径相对其 settings 文件解析。
