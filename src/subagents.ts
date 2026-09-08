@@ -4,7 +4,7 @@ import { Container, MouseRegion, Spacer, truncateToWidth, type Component, type T
 import { compact, statusColor, statusSymbol } from './presentation.ts';
 
 type NotificationStatus = 'running' | 'done' | 'error';
-type NotificationProtocol = 'tintinweb' | 'official';
+type NotificationProtocol = 'tintinweb' | 'official' | 'supervisor';
 type NotificationDetails = Record<string, unknown>;
 type Host = {
   ui: TUI;
@@ -39,10 +39,16 @@ function notificationProtocol(component: Component): NotificationProtocol | unde
   if (message?.display !== true) return undefined;
   if (message.customType === 'subagent-notification') return 'tintinweb';
   if (message.customType === 'subagent-notify') return 'official';
+  if (message.customType === 'subagent_supervisor_request') return 'supervisor';
 }
 
 export function isSubagentNotification(component: Component): component is CustomMessageComponent {
   return notificationProtocol(component) !== undefined;
+}
+
+function needsSupervisorReply(component: CustomMessageComponent): boolean {
+  const details = messageOf(component)?.details;
+  return details?.expectsReply === true || details?.reason === 'need_decision' || details?.reason === 'interview_request';
 }
 
 /** Reuse the official package's renderer without parsing or mutating its canonical card. */
@@ -184,6 +190,15 @@ export class SubagentGroup extends Container {
 
   summary(): string {
     if (this.protocol === 'official') return `Process · Subagent notifications ${this.components.length}`;
+    if (this.protocol === 'supervisor') {
+      let updates = 0, decisions = 0;
+      for (const component of this.components) {
+        if (needsSupervisorReply(component)) decisions++;
+        else updates++;
+      }
+      const counts = [updates && `${updates} update${updates === 1 ? '' : 's'}`, decisions && `${decisions} decision${decisions === 1 ? '' : 's'}`].filter(Boolean);
+      return `${decisions ? 'Attention' : 'Process'} · Supervisor ${counts.join(' · ')}`;
+    }
     let completed = 0, running = 0, failed = 0;
     for (const task of this.tasks) {
       if (task.status === 'done') completed++;
@@ -207,7 +222,8 @@ export class SubagentGroup extends Container {
     this.seen = this.version;
     this.clear();
     this.addChild(new Spacer(1));
-    const status: NotificationStatus = this.tasks.some(task => task.status === 'error') ? 'error'
+    const status: NotificationStatus = this.protocol === 'supervisor' && this.components.some(needsSupervisorReply)
+      ? 'error' : this.tasks.some(task => task.status === 'error') ? 'error'
       : this.tasks.some(task => task.status === 'running') ? 'running' : 'done';
     const style = (text: string) => this.host.color?.(statusColor[status], text) ?? text;
     this.addChild(new MouseRegion(line(() => `${this.open ? '▾' : '▸'} ${this.summary()}`, style), event => {
@@ -215,7 +231,7 @@ export class SubagentGroup extends Container {
       this.toggle();
       return { handled: true };
     }));
-    if (this.open && this.protocol === 'official') for (const component of this.components) {
+    if (this.open && (this.protocol === 'official' || this.protocol === 'supervisor')) for (const component of this.components) {
       let row = this.nativeRows.get(component);
       if (!row) { row = expandedNativeClone(component); this.nativeRows.set(component, row); }
       this.addChild(row);
