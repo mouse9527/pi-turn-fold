@@ -4,7 +4,7 @@ import { stripVTControlCharacters } from 'node:util';
 import { initTheme } from '@earendil-works/pi-coding-agent';
 import { visibleWidth, type TUI } from '@earendil-works/pi-tui';
 import { Turn, type Result } from '../src/turns.ts';
-import { compact, savedEditStats, toolRow } from '../src/presentation.ts';
+import { categories, compact, savedEditStats, toolAction, toolCategory, toolRow, toolTarget } from '../src/presentation.ts';
 import { TurnView, type ViewHost } from '../src/view.ts';
 
 initTheme('dark', false);
@@ -14,19 +14,50 @@ const host: ViewHost = { ui: { requestRender() {} } as TUI, cwd: process.cwd(), 
 
 test('fixed categories count calls, preserve builtin actions and unknown names, never infer shell intent', () => {
   const turn = new Turn();
-  const names = ['read', 'read', 'read', 'bash', 'powershell', 'edit', 'write', 'grep', 'find', 'ls', 'mcp__read'];
+  const names = ['read', 'read', 'read', 'bash', 'powershell', 'edit', 'write', 'grep', 'find', 'ls', 'mcp__read', 'Agent'];
   for (const [index, name] of names.entries()) {
     const tool = turn.tool(String(index), name, { path: 'same.ts', command: 'cat same.ts' });
     turn.tool(tool.id, name, tool.args); // streamed snapshot, not a new call
     turn.result(tool, success);
   }
   const group = turn.groupOf.get(turn.tools.get('0')!)!;
-  assert.equal(group.summary(false), 'Process · Read 3 · Search 3 · Run 2 · Edit 2 · Other 1');
+  assert.deepEqual(categories, ['Read', 'Search', 'Run', 'Edit', 'Subagent', 'Other']);
+  assert.equal(group.summary(false), 'Process · Read 3 · Search 3 · Run 2 · Edit 2 · Subagent 1 · Other 1');
   assert.equal(group.activity(turn.running), '');
   assert.match(toolRow(turn.tools.get('10')!), /✓ mcp__read same.ts/);
   assert.match(toolRow(turn.tools.get('6')!), /✓ write same.ts/);
   assert.match(toolRow(turn.tools.get('8')!), /✓ find same.ts/);
   assert.match(toolRow(turn.tools.get('9')!), /✓ ls same.ts/);
+});
+
+test('exact subagent tools share one category while actions and bounded targets omit payloads', () => {
+  const turn = new Turn();
+  const hugePrompt = 'PROMPT-MARKER-' + 'x'.repeat(1_000_000);
+  const hugeMessage = 'MESSAGE-MARKER-' + 'y'.repeat(1_000_000);
+  const cases = [
+    ['Agent', { description: 'inspect auth', prompt: hugePrompt }, 'agent', 'inspect auth'],
+    ['Agent', { name: 'worker', schedule: 'later', prompt: hugePrompt }, 'agent', 'worker'],
+    ['Agent', { resume: 'agent-123', prompt: hugePrompt }, 'resume', 'agent-123'],
+    ['SubagentWorkflow', { title: 'release checks', scriptPath: '/tmp/ignored.ts', script: hugePrompt }, 'workflow', 'release checks'],
+    ['get_subagent_result', { agent_id: 'agent-123' }, 'result', 'agent-123'],
+    ['steer_subagent', { agent_id: 'agent-123', message: hugeMessage }, 'steer', 'agent-123'],
+  ] as const;
+  for (const [index, [name, args, action, target]] of cases.entries()) {
+    const tool = turn.tool(String(index), name, args);
+    turn.result(tool, success);
+    assert.equal(toolCategory(tool), 'Subagent');
+    assert.equal(toolAction(tool), action);
+    assert.equal(toolTarget(tool), target);
+    assert.doesNotMatch(toolRow(tool), /PROMPT-MARKER|MESSAGE-MARKER/);
+    assert.equal(tool.args, args);
+    assert.equal(tool.result, success);
+  }
+  for (const name of ['agent', 'AgentResume', 'SubagentWorkflowExtra', 'get_subagent_results', 'steer-subagent']) {
+    const tool = turn.tool(`other-${name}`, name, { query: 'visible' });
+    assert.equal(toolCategory(tool), 'Other');
+  }
+  const group = turn.groupOf.get(turn.tools.get('0')!)!;
+  assert.equal(group.summary(false), 'Unfinished · Subagent 6 · Other 5 · 5 unfinished');
 });
 
 test('pending, parallel starts, out-of-order and corrected results maintain current operation and failure maps', () => {
