@@ -26,6 +26,10 @@ const notification = (id: string, status: string, details: Record<string, unknow
 };
 const officialNotification = (id: string, display = true) => ({ role: 'custom', customType: 'subagent-notify',
   content: `official-notification-${id}`, display, timestamp: 4 });
+const supervisorRequest = (id: string, reason: 'progress_update' | 'need_decision' | 'interview_request', display = true) => ({
+  role: 'custom', customType: 'subagent_supervisor_request', content: `supervisor-request-${id}`, display, timestamp: 4,
+  details: { requestId: id, reason, expectsReply: reason !== 'progress_update', runId: 'run-1', agent: 'worker', childIndex: 0 },
+});
 const custom = (customType: string, content: string) => ({ role: 'custom', customType, content, display: true, timestamp: 4 });
 
 // Keep all display/control methods on the actual installed prototype. Only dependencies are stubbed.
@@ -46,7 +50,9 @@ function host() {
     extensionRunner: { getMarkdownTransformers: () => [],
       getMessageRenderer: (name: string) => name === 'subagent-notify'
         ? (message: any, options: any) => new Text(`official-native-${options.expanded ? 'expanded' : 'collapsed'}:${message.content}`, 0, 0)
-        : undefined,
+        : name === 'subagent_supervisor_request'
+          ? (message: any, options: any) => new Text(`supervisor-native-${options.expanded ? 'expanded' : 'collapsed'}:${message.content}`, 0, 0)
+          : undefined,
       getEntryRenderer: (name: string) => name === 'test-entry' ? () => new Text('custom-entry-visible', 0, 0) : undefined },
     getToolDefinition: () => definition, getSteeringMessages: () => [], getFollowUpMessages: () => [], retryAttempt: 0,
   };
@@ -300,6 +306,41 @@ test('official pi-subagents notifications fold by exact type and expand through 
     mode.renderSessionItems([officialNotification('history')]);
     assert.match(text(mode.chatContainer), /Process · Subagent notifications 1/);
     assert.doesNotMatch(text(mode.chatContainer), /official-notification-history/);
+  } finally { adapter.dispose(true); }
+});
+
+test('official supervisor requests fold by exact type without mutating communication details', () => {
+  const { mode } = host();
+  const adapter = installAdapter();
+  try {
+    const update = supervisorRequest('update', 'progress_update');
+    const decision = supervisorRequest('decision', 'need_decision');
+    const saved = structuredClone([update, decision]);
+    mode.addMessageToChat(update);
+    mode.addMessageToChat(decision);
+    mode.addMessageToChat(custom('subagent_supervisor_request_extra', 'supervisor-lookalike-visible'));
+    const canonical = mode.chatContainer.children.filter((child: any) =>
+      child instanceof CustomMessageComponent && (child as any).message?.customType === 'subagent_supervisor_request') as CustomMessageComponent[];
+    assert.equal(canonical.length, 2);
+    let lines = mode.chatContainer.render(100).map(stripVTControlCharacters);
+    assert.match(lines.join('\n'), /Attention · Supervisor 1 update · 1 decision/);
+    assert.match(lines.join('\n'), /supervisor-lookalike-visible/);
+    assert.doesNotMatch(lines.join('\n'), /supervisor-native-|supervisor-request-(?:update|decision)/);
+    const headerY = lines.findIndex((line: string) => line.includes('Supervisor 1 update'));
+    assert.ok(mode.chatContainer.handleMouse({ type: 'click', button: 'left', x: 1, y: headerY, screenX: 1, screenY: headerY,
+      width: 100, height: lines.length, shift: false, ctrl: false, alt: false })?.handled);
+    lines = mode.chatContainer.render(100).map(stripVTControlCharacters);
+    assert.match(lines.join('\n'), /supervisor-native-expanded:supervisor-request-update/);
+    assert.match(lines.join('\n'), /supervisor-native-expanded:supervisor-request-decision/);
+    assert.deepEqual([update, decision], saved, 'display folding never changes request IDs or reply metadata');
+    assert.ok(canonical.every(component => (component as any)._expanded === false));
+    adapter.setEnabled(false);
+    assert.match(text(mode.chatContainer), /supervisor-native-collapsed:supervisor-request-decision/);
+    adapter.setEnabled(true);
+    mode.chatContainer.clear();
+    mode.renderSessionItems([supervisorRequest('history', 'progress_update')]);
+    assert.match(text(mode.chatContainer), /Process · Supervisor 1 update/);
+    assert.doesNotMatch(text(mode.chatContainer), /supervisor-request-history/);
   } finally { adapter.dispose(true); }
 });
 
