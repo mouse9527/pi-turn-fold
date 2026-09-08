@@ -67,6 +67,25 @@ function supervisorKind(component: Component): 'update' | 'decision' | 'alert' |
   return details?.expectsReply === true || details?.reason === 'need_decision' || details?.reason === 'interview_request' ? 'decision' : 'update';
 }
 
+function supervisorState(components: Component[]) {
+  const replies = components.flatMap(component => {
+    const data = entryOf(component)?.data;
+    return data && typeof data === 'object' ? [data] : [];
+  });
+  let updates = 0, decisions = 0, alerts = 0;
+  for (const component of components) {
+    const kind = supervisorKind(component);
+    if (kind === 'update' || kind === 'reply') { if (kind === 'update') updates++; continue; }
+    const details = messageOf(component)?.details;
+    const resolved = kind === 'decision'
+      ? replies.some(reply => reply.requestId === details?.requestId)
+      : replies.some(reply => reply.runId === details?.event?.runId && typeof reply.createdAt === 'number' &&
+          typeof details?.event?.ts === 'number' && reply.createdAt >= details.event.ts);
+    if (!resolved) { if (kind === 'decision') decisions++; else alerts++; }
+  }
+  return { updates, decisions, alerts, replies: replies.length, attention: decisions + alerts > 0 };
+}
+
 /** Reuse the official package's renderer without parsing or mutating its canonical card. */
 function expandedNativeClone(component: Component): Component {
   const source = component as any;
@@ -212,17 +231,10 @@ export class SubagentGroup extends Container {
   summary(): string {
     if (this.protocol === 'official') return `Process · Subagent notifications ${this.components.length}`;
     if (this.protocol === 'supervisor') {
-      let updates = 0, decisions = 0, alerts = 0, replies = 0;
-      for (const component of this.components) {
-        const kind = supervisorKind(component);
-        if (kind === 'decision') decisions++;
-        else if (kind === 'alert') alerts++;
-        else if (kind === 'reply') replies++;
-        else updates++;
-      }
-      const counts = [updates && `${updates} update${updates === 1 ? '' : 's'}`, alerts && `${alerts} alert${alerts === 1 ? '' : 's'}`,
-        decisions && `${decisions} decision${decisions === 1 ? '' : 's'}`, replies && `${replies} repl${replies === 1 ? 'y' : 'ies'}`].filter(Boolean);
-      return `${decisions || alerts ? 'Attention' : 'Process'} · Supervisor ${counts.join(' · ')}`;
+      const { updates, decisions, alerts, replies, attention } = supervisorState(this.components);
+      const counts = [updates && `${updates} update${updates === 1 ? '' : 's'}`, decisions && `${decisions} decision${decisions === 1 ? '' : 's'}`,
+        alerts && `${alerts} alert${alerts === 1 ? '' : 's'}`, replies && `${replies} repl${replies === 1 ? 'y' : 'ies'}`].filter(Boolean);
+      return `${attention ? 'Attention' : 'Process'} · Supervisor ${counts.join(' · ')}`;
     }
     let completed = 0, running = 0, failed = 0;
     for (const task of this.tasks) {
@@ -247,10 +259,8 @@ export class SubagentGroup extends Container {
     this.seen = this.version;
     this.clear();
     this.addChild(new Spacer(1));
-    const status: NotificationStatus = this.protocol === 'supervisor' && this.components.some(component => {
-      const kind = supervisorKind(component);
-      return kind === 'decision' || kind === 'alert';
-    }) ? 'running' : this.tasks.some(task => task.status === 'error') ? 'error'
+    const status: NotificationStatus = this.protocol === 'supervisor' && supervisorState(this.components).attention
+      ? 'running' : this.tasks.some(task => task.status === 'error') ? 'error'
       : this.tasks.some(task => task.status === 'running') ? 'running' : 'done';
     const style = (text: string) => this.host.color?.(statusColor[status], text) ?? text;
     this.addChild(new MouseRegion(line(() => `${this.open ? '▾' : '▸'} ${this.summary()}`, style), event => {
