@@ -3,6 +3,7 @@ import { test } from 'node:test';
 import { stripVTControlCharacters } from 'node:util';
 import { initTheme } from '@earendil-works/pi-coding-agent';
 import { visibleWidth, type TUI } from '@earendil-works/pi-tui';
+import { isRoutineMcpRefreshNotice } from '../src/notices.ts';
 import { Turn, type Result } from '../src/turns.ts';
 import { categories, compact, savedEditStats, toolAction, toolCategory, toolRow, toolTarget } from '../src/presentation.ts';
 import { TurnView, type ViewHost } from '../src/view.ts';
@@ -11,6 +12,12 @@ initTheme('dark', false);
 const success: Result = { content: [], isError: false };
 const host: ViewHost = { ui: { requestRender() {} } as TUI, cwd: process.cwd(), showImages: false,
   imageWidthCells: 60, markdownTransformers: [], toolDefinition: () => undefined };
+
+test('only routine MCP direct-tool refresh info notices are suppressible', () => {
+  assert.equal(isRoutineMcpRefreshNotice('MCP: direct tools refreshed (+9, ~0, -0)', 'info'), true);
+  assert.equal(isRoutineMcpRefreshNotice('MCP: direct tools refreshed (+0, ~0, -9)', 'warning'), false);
+  assert.equal(isRoutineMcpRefreshNotice('MCP initialization failed: unavailable', 'error'), false);
+});
 
 test('fixed categories count calls, preserve builtin actions and unknown names, never infer shell intent', () => {
   const turn = new Turn();
