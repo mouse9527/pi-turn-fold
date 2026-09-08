@@ -1,8 +1,8 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { stripVTControlCharacters } from 'node:util';
-import { InteractiveMode, AssistantMessageComponent, ToolExecutionComponent, VERSION, initTheme, createBashToolDefinition } from '@earendil-works/pi-coding-agent';
-import { Container, Text, TuiMainScreen } from '@earendil-works/pi-tui';
+import { InteractiveMode, AssistantMessageComponent, CustomMessageComponent, ToolExecutionComponent, VERSION, initTheme, createBashToolDefinition } from '@earendil-works/pi-coding-agent';
+import { Container, Text, TuiMainScreen, visibleWidth } from '@earendil-works/pi-tui';
 import { createInteractiveTuiReference } from '../node_modules/@earendil-works/pi-coding-agent/dist/modes/interactive/tui-renderer.js';
 import { installAdapter } from '../src/adapter.ts';
 import type { AssistantMessage } from '../src/turns.ts';
@@ -19,6 +19,12 @@ const assistant = (content: AssistantMessage['content'], stopReason: AssistantMe
 });
 const result = (id: string, isError = false) => ({ role: 'toolResult', toolCallId: id, toolName: 'probe',
   content: [{ type: 'text', text: `saved-output-${id}` }], details: {}, isError, timestamp: 3 });
+const notification = (id: string, status: string, details: Record<string, unknown> = {}) => {
+  const saved = { id, description: `task-${id}`, status, toolUses: 2, totalTokens: 30, totalCost: 0.01, durationMs: 1200 };
+  Object.defineProperties(saved, Object.getOwnPropertyDescriptors(details));
+  return { role: 'custom', customType: 'subagent-notification', content: `native-notification-${id}`, display: true, timestamp: 4, details: saved };
+};
+const custom = (customType: string, content: string) => ({ role: 'custom', customType, content, display: true, timestamp: 4 });
 
 // Keep all display/control methods on the actual installed prototype. Only dependencies are stubbed.
 function host() {
@@ -195,6 +201,120 @@ test('real historical rendering routes late results to their owning turns and re
     mode.chatContainer.clear();
     assert.equal(adapter.views.length, 0);
     assert.equal(text(mode.chatContainer), '');
+  } finally { adapter.dispose(true); }
+});
+
+test('live and historical exact notification components fold without replacing canonical native cards', () => {
+  const { mode } = host();
+  const adapter = installAdapter();
+  try {
+    mode.addMessageToChat(notification('done', 'completed'));
+    mode.addMessageToChat(notification('failed', 'failed'));
+    mode.addMessageToChat(custom('subagent-notification-extra', 'lookalike-visible'));
+    mode.addMessageToChat(notification('running', 'running'));
+    const fake = new Text('<subagent-notification>rendered text only</subagent-notification>', 0, 0);
+    mode.chatContainer.addChild(fake);
+    const canonicalNotifications = mode.chatContainer.children.filter((child: any) => child instanceof CustomMessageComponent && (child as any).message?.customType === 'subagent-notification');
+    assert.equal(canonicalNotifications.length, 3);
+    let folded = text(mode.chatContainer);
+    assert.match(folded, /Failed · Subagents 1 completed · 1 failed/);
+    assert.match(folded, /Working · Subagents 1 running/);
+    assert.match(folded, /lookalike-visible/);
+    assert.match(folded, /rendered text only/);
+    assert.doesNotMatch(folded, /native-notification-/);
+    adapter.setEnabled(false);
+    const native = text(mode.chatContainer);
+    assert.match(native, /native-notification-done/);
+    assert.match(native, /native-notification-failed/);
+    assert.match(native, /native-notification-running/);
+    assert.doesNotMatch(native, /Subagents \d/);
+    adapter.setEnabled(true);
+    assert.equal(text(mode.chatContainer).match(/Subagents/g)?.length, 2);
+    mode.chatContainer.removeChild(canonicalNotifications[0]);
+    folded = text(mode.chatContainer);
+    assert.match(folded, /Failed · Subagents 1 failed/);
+    assert.doesNotMatch(folded, /task-done/);
+    mode.chatContainer.clear();
+    assert.equal(text(mode.chatContainer), '');
+    mode.renderSessionItems([notification('history-a', 'completed', { others: [{ id: 'history-child', description: 'task-history-child',
+      status: 'steered', toolUses: 1, totalTokens: 5, durationMs: 10, resultPreview: '' }] }), notification('history-b', 'completed')]);
+    assert.match(text(mode.chatContainer), /Process · Subagents 3 completed/);
+    assert.doesNotMatch(text(mode.chatContainer), /native-notification-history/);
+    for (let i = 0; i < 10; i++) {
+      adapter.setEnabled(false);
+      adapter.setEnabled(true);
+      assert.equal(text(mode.chatContainer).match(/Process · Subagents 3 completed/g)?.length, 1);
+    }
+    const historicalNative = mode.chatContainer.children.filter((child: any) => child instanceof CustomMessageComponent);
+    adapter.dispose(true);
+    assert.ok(historicalNative.every((child: any) => mode.chatContainer.children.includes(child)));
+    assert.match(text(mode.chatContainer), /native-notification-history-a/);
+    assert.doesNotMatch(text(mode.chatContainer), /Process · Subagents/);
+  } finally { adapter.dispose(true); }
+});
+
+test('custom-entry direct splices preserve notification group chronology and split adjacency', async () => {
+  const { mode } = host();
+  const adapter = installAdapter();
+  try {
+    mode.addMessageToChat(notification('before', 'completed'));
+    await mode.handleEvent({ type: 'message_start', message: assistant([]) });
+    await mode.handleEvent({ type: 'entry_appended', entry: { type: 'custom', id: 'entry', parentId: null,
+      timestamp: new Date(0).toISOString(), customType: 'test-entry', data: {} } });
+    mode.addMessageToChat(notification('after', 'completed'));
+    const visible = text(mode.chatContainer);
+    const before = visible.indexOf('Process · Subagents 1 completed');
+    const entry = visible.indexOf('custom-entry-visible');
+    const after = visible.indexOf('Process · Subagents 1 completed', before + 1);
+    assert.ok(before >= 0 && before < entry && entry < after, visible);
+    assert.equal(visible.match(/Process · Subagents 1 completed/g)?.length, 2);
+  } finally { adapter.dispose(true); }
+});
+
+test('notification mouse disclosure is two-level, lazy, bounded and terminal-safe', () => {
+  const { mode } = host();
+  const adapter = installAdapter();
+  let previewReads = 0, pathReads = 0;
+  const details: Record<string, unknown> = { description: '\x1b[2Jtask-safe', status: 'completed', toolUses: 7,
+    totalTokens: 1234, totalCost: 0.5, durationMs: 2500 };
+  Object.defineProperty(details, 'resultPreview', { enumerable: true, get() {
+    previewReads++; return '\x1b[31mRESULT-SAFE\x1b[0m\x00 ' + 'x'.repeat(1_000_000) + 'PREVIEW-TAIL';
+  } });
+  Object.defineProperty(details, 'outputFile', { enumerable: true, get() {
+    pathReads++; return '/tmp/OUTPUT-SAFE-' + 'y'.repeat(1_000_000) + 'PATH-TAIL';
+  } });
+  try {
+    mode.addMessageToChat(notification('lazy', 'completed', details));
+    mode.addMessageToChat(notification('bad', 'failed'));
+    mode.addMessageToChat(notification('live', 'running'));
+    let lines = mode.chatContainer.render(80).map(stripVTControlCharacters);
+    assert.equal(previewReads, 0);
+    assert.equal(pathReads, 0);
+    assert.match(lines.join('\n'), /Failed · Subagents 1 completed · 1 running · 1 failed/);
+    const event = (y: number, width = 80) => ({ type: 'click' as const, button: 'left' as const, x: 1, y,
+      screenX: 1, screenY: y, width, height: lines.length, shift: false, ctrl: false, alt: false });
+    const headerY = lines.findIndex((line: string) => line.includes('Subagents'));
+    assert.ok(mode.chatContainer.handleMouse(event(headerY))?.handled);
+    lines = mode.chatContainer.render(80).map(stripVTControlCharacters);
+    assert.equal(previewReads, 0);
+    assert.equal(pathReads, 0);
+    assert.match(lines.join('\n'), /▸ ✓ task-safe/);
+    const rowY = lines.findIndex((line: string) => line.includes('task-safe'));
+    assert.ok(mode.chatContainer.handleMouse(event(rowY))?.handled);
+    lines = mode.chatContainer.render(80).map(stripVTControlCharacters);
+    assert.equal(previewReads, 1);
+    assert.equal(pathReads, 1);
+    const expanded = lines.join('\n');
+    assert.match(expanded, /Tool uses: 7 · Tokens: 1234 · Cost: \$0.5 · Duration: 2.5s/);
+    assert.match(expanded, /RESULT-SAFE/);
+    assert.match(expanded, /OUTPUT-SAFE/);
+    assert.doesNotMatch(expanded, /PREVIEW-TAIL|PATH-TAIL|\x1b|\x00/);
+    for (const width of [1, 7, 17, 40]) for (const rendered of mode.chatContainer.render(width))
+      assert.ok(visibleWidth(rendered) <= width, `${width}: ${rendered}`);
+    adapter.setEnabled(false);
+    adapter.setEnabled(true);
+    assert.equal(previewReads, 1, 'off closes synthetic details and on stays collapsed');
+    assert.equal(pathReads, 1);
   } finally { adapter.dispose(true); }
 });
 

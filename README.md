@@ -28,11 +28,13 @@ Expand one process group, then an individual item:
     [native saved edit diff]
 ```
 
-Labels use English categories and recognizable lowercase tool actions, with call counts (not distinct-file counts). Known tools are categorized by their registered name, never by guessing shell commands; custom/MCP names remain visible in item rows and count under `Other`. Status glyphs (`○`, `…`, `✓`, `✗`) remain meaningful without color; colors come from Pi's current theme.
+Labels use English categories and recognizable lowercase tool actions, with call counts (not distinct-file counts). Exact tool names `Agent`, `SubagentWorkflow`, `get_subagent_result`, and `steer_subagent` count under `Subagent`; their rows use `agent`/`resume`, `workflow`, `result`, and `steer` with bounded structured targets, never the large prompt/script/message. Known tools are categorized by registered name, never by substring or shell-command guesses; lookalikes and other custom/MCP names remain visible under `Other`. Status glyphs (`○`, `…`, `✓`, `✗`) remain meaningful without color; colors come from Pi's current theme.
 
 Headers use `Process` for completed groups, `Working` for active groups, `Unfinished` for stopped unresolved groups, and `Failed` for failed groups. Running groups add one `Running:` activity line; builtin shells show only `Running: bash` or `Running: powershell`, with no command or arguments. Other tools retain their bounded target/path. After the run stops, outstanding calls use `Unfinished:` instead, with shell arguments still omitted. Failed groups show a failure count and a short reason followed by the failed action/name and bounded target (for example `Failed: exit code 1 · bash npm test`). A parallel current/outstanding call shares that same status line. The reason comes first so long targets cannot hide it; pending/unresolved calls are never labeled completed. These compact hints do not replace saved details. Only successful `edit` results with a valid saved, numbered Pi diff get `+added −removed` statistics.
 
 Groups expand independently, with Pi's standard outer message spacing. Click the group header or its activity line to show items, then an item row to inspect saved arguments, output and edit diffs inline. Open tool/native detail components are retained across streamed results; nested controls provided by a registered native renderer keep their own state. The plugin does not infer arbitrary Agent/MCP child executions from output text or invent a universal nested-call schema. Later tool calls never pull earlier assistant text back into a fold. Plain-text answers without tools or thinking create no empty process row. This is **not** a final-answer-only Focus view.
+
+Adjacent visible Pi `CustomMessageComponent` cards whose structured message has exact `customType: "subagent-notification"` and `display: true` get a separate compact group such as `Process · Subagents 3 completed`. Mixed groups show running and failed counts even while collapsed. In fullscreen mode, click the group, then a task row, to reveal only bounded structured metadata (tool uses, tokens, cost, duration, result preview, and output path). The folded view never parses card text/XML, reads transcript output files, or associates `subagents:record` entries. Any unrelated custom component splits the run and remains native.
 
 Failures, aborted responses, truncation and unfinished calls are indicated outside the collapsed details. Pi's extension dialogs, notices, editor and execution behavior remain native.
 
@@ -125,13 +127,13 @@ Off is a display switch, not an unload: lightweight event/group state keeps trac
 - `edit` uses the diff saved in the result. Historical expansion does not preview the edit against today's file.
 - `write` shows saved written content. **No old-file snapshot means no trustworthy before/after diff.** This extension does not capture snapshots or change writes.
 - “Full output” means what Pi saved. Content already truncated by a tool cannot be recreated.
-- Custom extension notices and user-run `!` shell commands stay native and may occupy multiple lines. They are not silently hidden as assistant process.
+- Custom extension notices and user-run `!` shell commands stay native and may occupy multiple lines. The only custom-message exception is the exact structured `subagent-notification` card described above; unknown custom messages and all custom entries remain visible.
 - No custom theme, animation, settings panel, snapshots, telemetry, new tools, or model calls.
 - **Internal runtime adaptation is required.** No Pi files are patched on disk, but private methods are wrapped in memory. Public extension APIs alone cannot implement this behavior. Unknown renderer conflicts and Pi upgrades can break it.
 
 ## Performance and validation
 
-Collapsed tools do not invoke native result/diff/image rendering. Pi's lightweight canonical component shells remain so native lifecycle handling is preserved; a separate visible component tree skips them during layout. Tool state and group counts are updated by ID, not by rescanning history. Only the current assistant message is inspected for new text/tool boundaries. Completed text components are reused, not rebuilt when later tools update. Details are created on demand and dropped on collapse. The extension adds no timer.
+Collapsed tools do not invoke native result/diff/image rendering. Collapsed subagent notification groups do not read previews/output paths or construct task details. Pi's lightweight canonical component shells remain so native lifecycle handling is preserved; a separate visible component tree skips them during layout. Tool state and group counts are updated by ID, not by rescanning history. Only the current assistant message is inspected for new text/tool boundaries. Completed text components are reused, not rebuilt when later tools update. Details are created on demand and dropped on collapse. The extension adds no timer.
 
 Local synthetic display microbenchmark (Node 22, Pi 0.85.1):
 

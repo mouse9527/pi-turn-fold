@@ -23,7 +23,7 @@ export class ProcessGroup {
   truncated = 0;
   revision = 0;
 
-  readonly categories: Record<Category, number> = { Read: 0, Search: 0, Run: 0, Edit: 0, Other: 0 };
+  readonly categories: Record<Category, number> = { Read: 0, Search: 0, Run: 0, Edit: 0, Subagent: 0, Other: 0 };
   readonly pending = new Map<string, Tool>();
   readonly runningTools = new Map<string, Tool>();
   readonly failures = new Map<string, Tool>();

@@ -1,6 +1,7 @@
 import { InteractiveMode, AssistantMessageComponent, ToolExecutionComponent, VERSION } from '@earendil-works/pi-coding-agent';
 import { Container, type Component } from '@earendil-works/pi-tui';
 import { Turn, type AssistantMessage, type Tool } from './turns.ts';
+import { SubagentProjection } from './subagents.ts';
 import { TurnView, type ViewHost } from './view.ts';
 
 // All unsupported host access is quarantined here, pinned to the tested Pi release.
@@ -26,6 +27,9 @@ export function installAdapter(version = VERSION) {
   const hidden = new WeakSet<object>();
   const projection = new Container();
   const viewAnchors = new Map<Component, TurnView>();
+  let subagents: SubagentProjection | undefined;
+
+  const projected = (child: Component) => hidden.has(child) ? undefined : viewAnchors.get(child) ?? child;
 
   function patch(target: any, key: string, wrap: (original: Method) => Method) {
     const descriptor = Object.getOwnPropertyDescriptor(target, key);
@@ -45,6 +49,7 @@ export function installAdapter(version = VERSION) {
     views.length = 0;
     owners.clear();
     viewAnchors.clear();
+    subagents?.clear();
     projection.clear();
     current = undefined;
   }
@@ -77,15 +82,19 @@ export function installAdapter(version = VERSION) {
         !(host instanceof InteractiveMode)) throw new Error('Incompatible interactive host');
     mode = host;
     const chat = mode.chatContainer;
-    for (const child of chat.children) projection.addChild(child);
+    subagents = new SubagentProjection(projection, {
+      ui: mode.ui,
+      color: (name, text) => color?.(name, text) ?? text,
+    });
+    for (const child of chat.children) subagents.append(child, projected(child));
     patch(chat, 'addChild', original => function(child) {
       original.call(this, child);
       if (child instanceof AssistantMessageComponent || child instanceof ToolExecutionComponent) hidden.add(child);
-      if (!hidden.has(child)) projection.addChild(viewAnchors.get(child) ?? child);
+      subagents!.append(child, projected(child));
     });
     patch(chat, 'removeChild', original => function(child) {
       original.call(this, child);
-      projection.removeChild(viewAnchors.get(child) ?? child);
+      subagents!.reconcile(this.children, projected);
     });
     patch(chat, 'clear', original => function() { reset(); return original.call(this); });
     patch(chat, 'render', original => function(width) {
@@ -180,6 +189,7 @@ export function installAdapter(version = VERSION) {
     else {
       // Drop open detail views. Keep lightweight event state current for immediate re-enable.
       for (const view of views) if (view.open) view.toggle();
+      subagents?.closeAll();
       hydrateNative();
     }
     mode.ui.requestRender(true);
@@ -197,6 +207,7 @@ export function installAdapter(version = VERSION) {
       if (hydrate) hydrateNative();
     }
     reset();
+    subagents = undefined;
     if (hydrate) mode?.ui.requestRender(true);
     mode = undefined;
   }
@@ -254,8 +265,7 @@ export function installAdapter(version = VERSION) {
       const result = original.apply(this, args);
       if (mode === this) {
         // Rare custom entries can bypass addChild via splice; reconcile only on that event.
-        projection.children = this.chatContainer.children.filter((child: Component) => !hidden.has(child))
-          .map((child: Component) => viewAnchors.get(child) ?? child);
+        subagents!.reconcile(this.chatContainer.children, projected);
       }
       return result;
     });
