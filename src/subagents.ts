@@ -37,14 +37,21 @@ function entryOf(component: Component): any {
   return (component as any).entry;
 }
 
-function notificationProtocol(component: Component): NotificationProtocol | undefined {
-  if (!(component instanceof CustomMessageComponent)) return entryOf(component)?.customType === 'subagent_supervisor_reply' ? 'supervisor' : undefined;
-  const message = messageOf(component);
+function messageProtocol(message: any): NotificationProtocol | undefined {
   if (message?.display !== true) return undefined;
   if (message.customType === 'subagent-notification') return 'tintinweb';
   if (message.customType === 'subagent-notify') return 'official';
   if (message.customType === 'subagent_supervisor_request') return 'supervisor';
   if (message.customType === 'subagent_control_notice' && message.details?.event?.reason === 'supervisor_request') return 'supervisor';
+}
+
+export function isFoldedSubagentMessage(message: unknown): boolean {
+  return messageProtocol(message) !== undefined;
+}
+
+function notificationProtocol(component: Component): NotificationProtocol | undefined {
+  return component instanceof CustomMessageComponent ? messageProtocol(messageOf(component))
+    : entryOf(component)?.customType === 'subagent_supervisor_reply' ? 'supervisor' : undefined;
 }
 
 export function isSubagentNotification(component: Component): boolean {

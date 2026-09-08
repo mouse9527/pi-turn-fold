@@ -56,7 +56,7 @@ export class ProcessGroup {
   activity(running: boolean) {
     let current: Tool | undefined;
     for (const tool of this.runningTools.values()) {
-      if (tool.name !== 'bash' && tool.name !== 'powershell') { current = tool; break; }
+      if (tool.name !== 'bash' && tool.name !== 'powershell' && toolCategory(tool) !== 'Other') { current = tool; break; }
     }
     const failure = this.failures.values().next().value as Tool | undefined;
     // Put the failure first so a long parallel target cannot clip away its reason.

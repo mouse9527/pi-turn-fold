@@ -242,7 +242,7 @@ test('native spacer leaves exactly one blank line from assistant text to process
     const turn = new Turn();
     turn.running = !historical;
     const view = new TurnView(turn, host);
-    const content = [text('说明 段末'), call('spacing')];
+    const content = [text('说明 段末'), { ...call('spacing'), name: 'read', arguments: { path: 'spacing' } }];
     const messages = mixed ? [assistant(content, 'toolUse')] : [assistant([content[0]]), assistant([content[1]], 'toolUse')];
     const gap = (width: number) => {
       const lines = view.render(width).map(stripVTControlCharacters);
@@ -271,14 +271,14 @@ test('native spacer leaves exactly one blank line from assistant text to process
     turn.startTool(tool, tool.args);
     for (let repeat = 0; repeat < 10; repeat++) {
       const { lines, headerY } = gap(100);
-      assert.match(lines[headerY + 1], /Running: probe spacing/);
+      assert.match(lines[headerY + 1], /Running: read spacing/);
       const y = headerY + 1;
       const event: TuiMouseEvent = { type: 'click', button: 'left', x: 1, y, screenX: 1, screenY: y,
         width: 100, height: lines.length, shift: false, ctrl: false, alt: false };
       assert.ok(view.handleMouse(event)?.handled, 'activity line stays aligned after the spacer');
       const opened = gap(100);
       assert.equal(opened.headerY, headerY);
-      assert.match(opened.lines[headerY + 2], /▸ … probe spacing/);
+      assert.match(opened.lines[headerY + 2], /▸ … read spacing/);
       assert.ok(view.handleMouse({ ...event, y: headerY + 2, screenY: headerY + 2, height: opened.lines.length })?.handled);
       assert.equal(view.rows.get(tool)?.open, true);
       view.render(100);

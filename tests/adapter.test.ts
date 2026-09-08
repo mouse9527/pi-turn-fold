@@ -360,6 +360,24 @@ test('official supervisor requests fold by exact type without mutating communica
   } finally { adapter.dispose(true); }
 });
 
+test('visible async subagent messages preserve chronology around assistant replies', () => {
+  const { mode } = host();
+  const adapter = installAdapter();
+  try {
+    mode.addMessageToChat(user('chronology-user'));
+    mode.addMessageToChat(assistant([{ type: 'text', text: 'assistant-before-update' }]));
+    mode.addMessageToChat(supervisorRequest('update-order', 'progress_update'));
+    mode.addMessageToChat(assistant([{ type: 'text', text: 'assistant-between-update-and-decision' }]));
+    mode.addMessageToChat(supervisorRequest('decision-order', 'need_decision'));
+    mode.addMessageToChat(assistant([{ type: 'text', text: 'assistant-after-decision' }]));
+    const visible = text(mode.chatContainer);
+    const labels = ['assistant-before-update', 'Process · Supervisor 1 update', 'assistant-between-update-and-decision',
+      'Attention · Supervisor 1 decision', 'assistant-after-decision'];
+    for (let index = 1; index < labels.length; index++) assert.ok(visible.indexOf(labels[index - 1]) < visible.indexOf(labels[index]), visible);
+    assert.equal(visible.match(/Supervisor 1/g)?.length, 2, 'assistant text splits the asynchronous notification groups');
+  } finally { adapter.dispose(true); }
+});
+
 test('custom-entry direct splices preserve notification group chronology and split adjacency', async () => {
   const { mode } = host();
   const adapter = installAdapter();
@@ -671,7 +689,8 @@ test('every interleaved streaming frame hides native shells, not assistant prose
     await send({ type: 'message_end', message: { ...planning, stopReason: 'toolUse' } });
     assert.equal(native.argsComplete, true);
     await send({ type: 'tool_execution_start', toolCallId: 'frames', toolName: 'probe', args });
-    assert.match(text(mode.chatContainer), /Running: probe INTENTIONAL-FIRST-LINE/);
+    assert.match(text(mode.chatContainer), /Working · Other 1 · 1 unfinished/);
+    assert.doesNotMatch(text(mode.chatContainer), /INTENTIONAL-FIRST-LINE/, 'custom and MCP activity stays in the one-line header');
     await send({ type: 'tool_execution_update', toolCallId: 'frames', partialResult: result('RAW-PARTIAL') });
     assert.deepEqual([counters.renderCall, counters.renderResult], [0, 0], 'even constructor-time renderers were gated');
     adapter.setEnabled(false);

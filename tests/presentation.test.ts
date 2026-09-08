@@ -30,6 +30,17 @@ test('fixed categories count calls, preserve builtin actions and unknown names, 
   assert.match(toolRow(turn.tools.get('9')!), /✓ ls same.ts/);
 });
 
+test('custom and MCP activity stays in the folded header while saved details remain available', () => {
+  const turn = new Turn();
+  turn.running = true;
+  const tool = turn.tool('mcp', 'litellm_tavily_search-tavily_search', { query: 'private query' });
+  turn.startTool(tool, tool.args);
+  const group = turn.groupOf.get(tool)!;
+  assert.equal(group.summary(true), 'Working · Other 1 · 1 unfinished');
+  assert.equal(group.activity(true), '');
+  assert.match(toolRow(tool), /litellm_tavily_search-tavily_search private query/);
+});
+
 test('exact subagent tools share one category while actions and bounded targets omit payloads', () => {
   const turn = new Turn();
   const hugePrompt = 'PROMPT-MARKER-' + 'x'.repeat(1_000_000);
