@@ -34,6 +34,16 @@ Headers use `Process` for completed groups, `Working` for active groups, `Unfini
 
 Groups expand independently, with Pi's standard outer message spacing. Click the group header or its activity line to show items, then an item row to inspect saved arguments, output and edit diffs inline. Open tool/native detail components are retained across streamed results; nested controls provided by a registered native renderer keep their own state. The plugin does not infer arbitrary Agent/MCP child executions from output text or invent a universal nested-call schema. Later tool calls never pull earlier assistant text back into a fold. Plain-text answers without tools or thinking create no empty process row. This is **not** a final-answer-only Focus view.
 
+> **Click-to-expand requires Pi fullscreen mode.** Set `tuiMode` in `~/.pi/agent/settings.json`, then restart Pi:
+>
+> ```json
+> {
+>   "tuiMode": "fullscreen"
+> }
+> ```
+>
+> Folding still works in regular mode, but Pi does not deliver mouse clicks to the folded components there.
+
 Adjacent visible Pi `CustomMessageComponent` cards whose structured message has exact `customType: "subagent-notification"` and `display: true` get a separate compact group such as `Process · Subagents 3 completed`. Mixed groups show running and failed counts even while collapsed. In fullscreen mode, click the group, then a task row, to reveal only bounded structured metadata (tool uses, tokens, cost, duration, result preview, and output path). The folded view never parses card text/XML, reads transcript output files, or associates `subagents:record` entries. Any unrelated custom component splits the run and remains native.
 
 Failures, aborted responses, truncation and unfinished calls are indicated outside the collapsed details. Pi's extension dialogs, notices, editor and execution behavior remain native.
