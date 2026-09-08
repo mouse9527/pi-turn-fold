@@ -488,8 +488,7 @@ test('native bash elapsed timer is cleared when folding resumes, without stoppin
     assert.equal(mode.pendingTools.get('shell'), native);
     assert.equal(native.executionStarted, true);
     assert.equal(native.isPartial, true);
-    assert.match(text(mode.chatContainer), /Running: bash(?:\n|$)/);
-    assert.doesNotMatch(text(mode.chatContainer), /never executed/);
+    assert.doesNotMatch(text(mode.chatContainer), /Running: bash|never executed/);
     adapter.setEnabled(false);
     const resumed = native.rendererState.interval;
     assert.ok(resumed, 'native display may resume its own timer while off');
@@ -637,17 +636,20 @@ for (const name of ['bash', 'powershell']) test(`${name} closed frames omit argu
     assert.equal(mode.pendingTools.get('shell').argsComplete, true);
     assert.doesNotMatch(text(mode.chatContainer), /Running:/);
     await send('tool_execution_start', { type: 'tool_execution_start', toolCallId: 'shell', toolName: name, args: { command } });
-    assert.match(text(mode.chatContainer), new RegExp(`Running: ${name}(?:\\n|$)`));
+    assert.doesNotMatch(text(mode.chatContainer), /Running:|Unfinished:/);
     const output = { content: [{ type: 'text', text: 'OUTPUT-MARKER' }], isError: false };
     await send('tool_execution_update', { type: 'tool_execution_update', toolCallId: 'shell', partialResult: output });
     adapter.setEnabled(false);
     adapter.setEnabled(true);
     paint('folding re-enabled during execution');
-    assert.match(text(mode.chatContainer), new RegExp(`Running: ${name}(?:\\n|$)`));
+    assert.doesNotMatch(text(mode.chatContainer), /Running:|Unfinished:/);
     await send('tool_execution_end', { type: 'tool_execution_end', toolCallId: 'shell', result: output, isError: false });
     assert.doesNotMatch(text(mode.chatContainer), /Running:/);
     await send('agent end', { type: 'agent_end' });
-    for (const { phase, value } of frames) assert.doesNotMatch(value, /COMMAND-MARKER|COMMAND-TAIL|OUTPUT-MARKER|native-probe-call/, phase);
+    for (const { phase, value } of frames) {
+      assert.doesNotMatch(value, /COMMAND-MARKER|COMMAND-TAIL|OUTPUT-MARKER|native-probe-call/, phase);
+      assert.doesNotMatch(value, new RegExp(`(?:Running|Unfinished): ${name}`), phase);
+    }
     assert.match(text(mode.chatContainer), /STREAMING-PROSE/);
     assert.equal(adapter.views[0].turn.tools.get('shell')?.args.command, command);
   } finally { adapter.dispose(true); }

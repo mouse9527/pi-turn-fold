@@ -68,14 +68,14 @@ test('pending, parallel starts, out-of-order and corrected results maintain curr
   const group = turn.groupOf.get(a)!;
   assert.equal(group.pending.size, 2);
   assert.equal(group.summary(false), 'Unfinished · Read 1 · Run 1 · 2 unfinished');
-  turn.startTool(a, a.args);
   turn.startTool(b, b.args);
+  turn.startTool(a, a.args);
   assert.equal(group.summary(true), 'Working · Read 1 · Run 1 · 2 unfinished');
-  assert.equal(group.activity(turn.running), 'Running: read a.ts');
+  assert.equal(group.activity(turn.running), 'Running: read a.ts', 'shell activity is skipped for the next non-shell call');
   turn.result(b, success, true);
   assert.equal(group.activity(turn.running), 'Running: read a.ts', 'partial updates do not reorder starts');
   turn.result(a, success);
-  assert.equal(group.activity(turn.running), 'Running: bash');
+  assert.equal(group.activity(turn.running), '', 'builtin shell activity stays inside the one-line summary');
   const failure = { content: [{ type: 'text', text: 'very detailed output\nCommand exited with code 1' }], isError: true };
   turn.result(b, failure);
   turn.result(b, failure);
@@ -94,12 +94,12 @@ test('pending, parallel starts, out-of-order and corrected results maintain curr
   turn.finish();
   assert.equal(group.summary(false), 'Unfinished · Read 1 · Run 1 · 1 unfinished');
   assert.equal(group.runningTools.size, 1);
-  assert.equal(group.activity(turn.running), 'Unfinished: bash');
+  assert.equal(group.activity(turn.running), '');
   assert.equal(b.status, 'running', 'finish does not invent a result or failure');
   assert.equal(b.result?.isError, false);
 });
 
-for (const name of ['bash', 'powershell']) test(`${name} activity omits megabyte streamed commands while expanded details retain them`, () => {
+for (const name of ['bash', 'powershell']) test(`${name} stays one-line while expanded details retain megabyte commands`, () => {
   const turn = new Turn();
   turn.running = true;
   const tool = turn.tool('shell', name, {});
@@ -119,13 +119,15 @@ for (const name of ['bash', 'powershell']) test(`${name} activity omits megabyte
     for (const end of [14, 30, command.length]) {
       turn.tool(tool.id, name, { command: command.slice(0, end) });
       turn.result(tool, output, true);
-      assert.equal(group.activity(true), `Running: ${name}`);
-      assert.match(frame(), new RegExp(`Running: ${name}(?:\\n|$)`));
+      assert.equal(group.activity(true), '');
+      assert.doesNotMatch(frame(), /Running:|Unfinished:/);
+      assert.match(frame(), /Working · Run 1 · 1 unfinished/);
       closed();
     }
     turn.finish();
-    assert.equal(group.activity(false), `Unfinished: ${name}`);
-    assert.match(frame(), new RegExp(`Unfinished: ${name}(?:\\n|$)`));
+    assert.equal(group.activity(false), '');
+    assert.doesNotMatch(frame(), /Running:|Unfinished:/);
+    assert.match(frame(), /Unfinished · Run 1 · 1 unfinished/);
     closed();
     view.toggle();
     assert.match(frame(), new RegExp(`${name} COMMAND-MARKER first line`));

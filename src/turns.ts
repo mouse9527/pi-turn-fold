@@ -54,11 +54,14 @@ export class ProcessGroup {
   }
 
   activity(running: boolean) {
-    const current = this.runningTools.values().next().value as Tool | undefined;
+    let current: Tool | undefined;
+    for (const tool of this.runningTools.values()) {
+      if (tool.name !== 'bash' && tool.name !== 'powershell') { current = tool; break; }
+    }
     const failure = this.failures.values().next().value as Tool | undefined;
-    // Put the failure first so a long parallel command cannot clip away its reason.
+    // Put the failure first so a long parallel target cannot clip away its reason.
     return (failure ? `Failed: ${failure.errorSummary ?? 'tool execution failed'} · ${toolAction(failure)} ${toolTarget(failure)}`.trimEnd() : '') +
-      (current ? `${failure ? ' · ' : ''}${running ? 'Running' : 'Unfinished'}: ${toolAction(current)} ${current.name === 'bash' || current.name === 'powershell' ? '' : toolTarget(current)}`.trimEnd() : '');
+      (current ? `${failure ? ' · ' : ''}${running ? 'Running' : 'Unfinished'}: ${toolAction(current)} ${toolTarget(current)}`.trimEnd() : '');
   }
 }
 
