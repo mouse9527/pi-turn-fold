@@ -4,7 +4,7 @@ import { Container, MouseRegion, Spacer, truncateToWidth, type Component, type T
 import { compact, statusColor, statusSymbol } from './presentation.ts';
 
 type NotificationStatus = 'running' | 'done' | 'error';
-type NotificationProtocol = 'tintinweb' | 'official' | 'supervisor';
+type NotificationProtocol = 'tintinweb' | 'official' | 'supervisor' | 'control';
 type NotificationDetails = Record<string, unknown>;
 type Host = {
   ui: TUI;
@@ -42,7 +42,8 @@ function messageProtocol(message: any): NotificationProtocol | undefined {
   if (message.customType === 'subagent-notification') return 'tintinweb';
   if (message.customType === 'subagent-notify') return 'official';
   if (message.customType === 'subagent_supervisor_request') return 'supervisor';
-  if (message.customType === 'subagent_control_notice' && message.details?.event?.reason === 'supervisor_request') return 'supervisor';
+  if (message.customType === 'subagent_control_notice')
+    return message.details?.event?.reason === 'supervisor_request' ? 'supervisor' : 'control';
 }
 
 export function isFoldedSubagentMessage(message: unknown): boolean {
@@ -230,6 +231,7 @@ export class SubagentGroup extends Container {
 
   summary(): string {
     if (this.protocol === 'official') return `Process · Subagent notifications ${this.components.length}`;
+    if (this.protocol === 'control') return `Attention · Subagent ${this.components.length} alert${this.components.length === 1 ? '' : 's'}`;
     if (this.protocol === 'supervisor') {
       const { updates, decisions, alerts, replies, attention } = supervisorState(this.components);
       const counts = [updates && `${updates} update${updates === 1 ? '' : 's'}`, decisions && `${decisions} decision${decisions === 1 ? '' : 's'}`,
@@ -259,7 +261,7 @@ export class SubagentGroup extends Container {
     this.seen = this.version;
     this.clear();
     this.addChild(new Spacer(1));
-    const status: NotificationStatus = this.protocol === 'supervisor' && supervisorState(this.components).attention
+    const status: NotificationStatus = this.protocol === 'control' || this.protocol === 'supervisor' && supervisorState(this.components).attention
       ? 'running' : this.tasks.some(task => task.status === 'error') ? 'error'
       : this.tasks.some(task => task.status === 'running') ? 'running' : 'done';
     const style = (text: string) => this.host.color?.(statusColor[status], text) ?? text;
@@ -268,7 +270,7 @@ export class SubagentGroup extends Container {
       this.toggle();
       return { handled: true };
     }));
-    if (this.open && (this.protocol === 'official' || this.protocol === 'supervisor')) for (const component of this.components) {
+    if (this.open && (this.protocol === 'official' || this.protocol === 'supervisor' || this.protocol === 'control')) for (const component of this.components) {
       let row = this.nativeRows.get(component);
       if (!row) { row = expandedNativeClone(component); this.nativeRows.set(component, row); }
       this.addChild(row);
