@@ -1,0 +1,217 @@
+name: Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing immutable annotated version tag (for example v0.3.0-rc.2)
+        required: true
+        type: string
+      notes:
+        description: Human change notes (leave empty to generate them)
+        required: false
+        type: string
+      stable_terminal_acceptance:
+        description: I confirm manual terminal acceptance is complete (required for stable releases)
+        required: true
+        default: false
+        type: boolean
+
+concurrency:
+  group: release-${{ inputs.tag }}
+  cancel-in-progress: false
+
+jobs:
+  resolve:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    outputs:
+      tag: ${{ steps.tag.outputs.tag }}
+      version: ${{ steps.tag.outputs.version }}
+      commit: ${{ steps.tag.outputs.commit }}
+      tag_object: ${{ steps.tag.outputs.tag_object }}
+      prerelease: ${{ steps.tag.outputs.prerelease }}
+    steps:
+      - name: Validate and resolve annotated tag
+        id: tag
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ inputs.tag }}
+          STABLE_ACCEPTED: ${{ inputs.stable_terminal_acceptance }}
+          DISPATCH_REF: ${{ github.ref }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        run: |
+          set -euo pipefail
+          if [[ "$DISPATCH_REF" != "refs/heads/$DEFAULT_BRANCH" ]]; then
+            echo "run the release workflow from the default branch ($DEFAULT_BRANCH), not $DISPATCH_REF" >&2
+            exit 1
+          fi
+          if [[ ! "$TAG" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-[0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*)?(\+[0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*)?$ ]]; then
+            echo "tag must be a safe vVERSION value such as v0.3.0 or v0.3.0-rc.2" >&2
+            exit 1
+          fi
+
+          VERSION=${TAG#v}
+          PRERELEASE=false
+          if [[ "$VERSION" == *-* ]]; then
+            PRERELEASE=true
+          elif [[ "$STABLE_ACCEPTED" != true ]]; then
+            echo "stable releases require explicit confirmation of completed manual terminal acceptance" >&2
+            exit 1
+          fi
+
+          REF=$(gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$TAG")
+          if [[ $(jq -r '.object.type' <<<"$REF") != tag ]]; then
+            echo "$TAG exists but is not an annotated tag" >&2
+            exit 1
+          fi
+          TAG_OBJECT=$(jq -r '.object.sha' <<<"$REF")
+          OBJECT=$(gh api "repos/$GITHUB_REPOSITORY/git/tags/$TAG_OBJECT")
+          if [[ $(jq -r '.object.type' <<<"$OBJECT") != commit ]]; then
+            echo "$TAG must directly annotate a commit" >&2
+            exit 1
+          fi
+          COMMIT=$(jq -r '.object.sha' <<<"$OBJECT")
+
+          {
+            echo "tag=$TAG"
+            echo "version=$VERSION"
+            echo "commit=$COMMIT"
+            echo "tag_object=$TAG_OBJECT"
+            echo "prerelease=$PRERELEASE"
+          } >> "$GITHUB_OUTPUT"
+
+  verify:
+    needs: resolve
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: refs/tags/${{ needs.resolve.outputs.tag }}
+          fetch-depth: 1
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - name: Validate checked-out version and commit
+        env:
+          EXPECTED_SHA: ${{ needs.resolve.outputs.commit }}
+          VERSION: ${{ needs.resolve.outputs.version }}
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
+          node <<'NODE'
+          const fs = require('node:fs');
+          const expected = process.env.VERSION;
+          const pkg = JSON.parse(fs.readFileSync('package.json', 'utf8'));
+          const lock = JSON.parse(fs.readFileSync('package-lock.json', 'utf8'));
+          if (pkg.version !== expected || lock.version !== expected || lock.packages?.['']?.version !== expected) {
+            console.error(`version mismatch: tag=${expected}, package=${pkg.version}, lock=${lock.version}, lock root=${lock.packages?.['']?.version}`);
+            process.exit(1);
+          }
+          NODE
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.x'
+      - run: npm ci --ignore-scripts --no-audit --no-fund
+      - run: npm run check
+      - run: npm test
+      - run: npm run bench
+      - run: python3 tests/smoke.py
+      - run: FOLD_SMOKE_FULLSCREEN=1 python3 tests/smoke.py
+
+  publish:
+    needs: [resolve, verify]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: write
+    steps:
+      - name: Revalidate tag and inspect existing release
+        id: release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.resolve.outputs.tag }}
+          EXPECTED_SHA: ${{ needs.resolve.outputs.commit }}
+          EXPECTED_TAG_OBJECT: ${{ needs.resolve.outputs.tag_object }}
+        run: |
+          set -euo pipefail
+          REF=$(gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$TAG")
+          test "$(jq -r '.object.type' <<<"$REF")" = tag
+          test "$(jq -r '.object.sha' <<<"$REF")" = "$EXPECTED_TAG_OBJECT"
+          OBJECT=$(gh api "repos/$GITHUB_REPOSITORY/git/tags/$EXPECTED_TAG_OBJECT")
+          test "$(jq -r '.object.type' <<<"$OBJECT")" = commit
+          test "$(jq -r '.object.sha' <<<"$OBJECT")" = "$EXPECTED_SHA"
+
+          set +e
+          gh api "repos/$GITHUB_REPOSITORY/releases/tags/$TAG" > "$RUNNER_TEMP/existing-release.json" 2> "$RUNNER_TEMP/release-error.txt"
+          STATUS=$?
+          set -e
+          if [[ $STATUS -eq 0 ]]; then
+            if [[ $(jq -r '.draft' "$RUNNER_TEMP/existing-release.json") == true ]]; then
+              echo "a draft release already exists for $TAG; review it manually instead of overwriting it" >&2
+              exit 1
+            fi
+            echo "release already published for $TAG: $(jq -r '.html_url' "$RUNNER_TEMP/existing-release.json")"
+            echo "create=false" >> "$GITHUB_OUTPUT"
+          elif grep -q 'HTTP 404' "$RUNNER_TEMP/release-error.txt"; then
+            echo "create=true" >> "$GITHUB_OUTPUT"
+          else
+            cat "$RUNNER_TEMP/release-error.txt" >&2
+            exit "$STATUS"
+          fi
+
+      - name: Publish GitHub Release
+        if: steps.release.outputs.create == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.resolve.outputs.tag }}
+          VERSION: ${{ needs.resolve.outputs.version }}
+          COMMIT: ${{ needs.resolve.outputs.commit }}
+          EXPECTED_TAG_OBJECT: ${{ needs.resolve.outputs.tag_object }}
+          PRERELEASE: ${{ needs.resolve.outputs.prerelease }}
+          CHANGE_NOTES: ${{ inputs.notes }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          NOTES_FILE="$RUNNER_TEMP/release-notes.md"
+          {
+            if [[ -n "$CHANGE_NOTES" ]]; then
+              printf '## Changes\n%s\n\n' "$CHANGE_NOTES"
+            fi
+            cat <<EOF
+          ## Compatibility
+          - Pi 0.85.1 only. This is a source-only release; no compiled assets or binaries are required.
+
+          ## Verification
+          - Validated commit: \`$COMMIT\`
+          - Workflow run: $RUN_URL
+          - Node 22 typecheck, tests, benchmark, and isolated regular/fullscreen PTY smoke passed.
+
+          ## Known limits
+          - Automated PTY checks do not verify Ghostty image pixels, real-session input/scroll latency, or sustained heap/CPU behavior.
+          - Do not combine this extension with another transcript/tool renderer.
+          EOF
+          } > "$NOTES_FILE"
+
+          ARGS=(release create "$TAG" --repo "$GITHUB_REPOSITORY" --verify-tag --title "pi-turn-fold $VERSION (Pi 0.85.1 only)" --notes-file "$NOTES_FILE")
+          if [[ -z "$CHANGE_NOTES" ]]; then
+            ARGS+=(--generate-notes)
+          fi
+          if [[ "$PRERELEASE" == true ]]; then
+            ARGS+=(--prerelease --latest=false)
+          fi
+
+          REF=$(gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$TAG")
+          test "$(jq -r '.object.type' <<<"$REF")" = tag
+          test "$(jq -r '.object.sha' <<<"$REF")" = "$EXPECTED_TAG_OBJECT"
+          OBJECT=$(gh api "repos/$GITHUB_REPOSITORY/git/tags/$EXPECTED_TAG_OBJECT")
+          test "$(jq -r '.object.type' <<<"$OBJECT")" = commit
+          test "$(jq -r '.object.sha' <<<"$OBJECT")" = "$COMMIT"
+          gh "${ARGS[@]}"

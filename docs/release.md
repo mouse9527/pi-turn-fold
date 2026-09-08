@@ -10,8 +10,8 @@
 - CI 已配置 `npm ci --ignore-scripts`、typecheck、node:test、microbench、真实 bundled Pi CLI 的 regular/fullscreen 隔离 PTY smoke。
 - **当前**：`main` 仍是开发分支；`v0.3.0-rc.1` 从隔离的 `release/v0.3.0-rc.1` 分支发布，未晋升为稳定 Latest。公开状态以 [GitHub Releases](https://github.com/mouse9527/pi-turn-fold/releases) 为准，历史版本号/版本提交本身不等于公开 Release。
 - **未来建议，尚未实施**：`dev` 承载开发/候选，默认分支 `main` 仅接收已验证的正式发布 SHA；届时无 ref 安装才可作为稳定更新渠道。现在无 ref 得到的是最新开发源码，不宣称稳定。
-- **尚未实现/本方案不新增**：release workflow、tag 保护规则、npm 分发、自动版本提升或自动 release notes。
-- 先用人工 `gh release create --draft` + 审核后发布；已有 CI 足够，不新增流水线、token 或发布依赖。
+- **现已实现**：`.github/workflows/release.yml` 提供仅限手动触发的 GitHub Release；仍不创建/移动 tag、不提升版本、不改分支、不发布 npm。
+- workflow 在只读 token 下验证既有 annotated tag、package/lock 版本和 commit，再重跑完整 CI；仅独立发布 job 获得 `contents: write`。
 - TS 源码由 Pi extension loader 直接加载；用户无需本地 `tsc` 或 `npm run build`，维护者也不生成发布 build。Pi 仍可能自动安装依赖；不上传 dist、二进制或 node_modules，GitHub 自带源码归档足够。
 - 运行时没有新增第三方依赖，Pi 核心 imports 由宿主提供；开发依赖不等于运行时捆绑依赖。
 
@@ -99,79 +99,30 @@ smoke 默认也指向上述 bundled CLI；显式参数防止误测另一个全�
 本次候选的本地测试结果记录于仓库外 release notes；最终 commit SHA 和分支/tag CI URL 必须由维护者验证后补齐，不能据准备过程宣称 CI 已通过。
 保存候选 SHA、命令退出码、Node/Pi 版本、bench 输出和人工结果；公开证据只用脱敏摘要/合成材料。
 
-## 5. CI、tag、公开 Release（逐步人工确认）
+## 5. 手工 tag，Actions 发布
 
-以下沿用上节变量；另开 shell 时须从验证记录恢复它们，不能默认最新 HEAD 就是已验证 SHA。
-
-```bash
-gh run list --repo "$REPO" --workflow CI --event push --branch "$BRANCH" --commit "$SHA" \
-  --json databaseId,headSha,headBranch,status,conclusion,url
-# 选择该分支 push、准确 SHA 的运行 ID，不使用无条件的“最近一次成功”。
-RUN_ID=替换为该次运行ID
-gh run watch "$RUN_ID" --repo "$REPO" --exit-status
-test "$(gh run view "$RUN_ID" --repo "$REPO" --json headSha --jq .headSha)" = "$SHA"
-test "$(gh run view "$RUN_ID" --repo "$REPO" --json headBranch --jq .headBranch)" = "$BRANCH"
-test "$(gh run view "$RUN_ID" --repo "$REPO" --json conclusion --jq .conclusion)" = success
-```
-
-未来正式版晋升（本次 RC 跳过；仅当未来分支策略另行批准并建立后适用）：先在 `dev` 完成正式版本号的准确 SHA CI + 第 3 节人工门禁，保存证据；维护者批准后才执行：
-
-```bash
-git fetch origin
-git switch main
-git merge --ff-only origin/main
-git merge --ff-only "$SHA"
-test "$(git rev-parse HEAD)" = "$SHA"
-git push origin main
-BRANCH=main
-```
-
-只能 fast-forward 到已验证 SHA，不可 squash/生成未验证 merge commit；无法快进就停止，在 `dev` 整理后重新验证新 SHA。
-晋升后按上面的分支 CI 命令重新选择 `main`、同一 `$SHA` 的 push 运行并通过，再继续 tag。
-`main` push 已让原生更新用户取得源码，不能等 Release 发布才算门禁；因此人工批准必须在晋升前完成。GitHub Release 是公告，不是下载开关。
+版本号、发布 commit 与 annotated tag 仍由维护者显式准备；workflow 不创建、不移动 tag，也不修改 package、lockfile、分支或用户本地安装。发布前先确认工作树、SHA 与 tag：
 
 ```bash
 test "$(git rev-parse HEAD)" = "$SHA"
 test -z "$(git status --porcelain)"
 git ls-remote --tags origin "refs/tags/$TAG" "refs/tags/$TAG^{}"
-# 输出必须为空；同名本地/远端 tag 已存在则停止，不覆盖。
+# 首次创建时远端输出必须为空；同名 tag 已存在则停止，不覆盖。
 git tag -a "$TAG" "$SHA" -m "pi-turn-fold $VERSION; Pi 0.85.1"
 git push origin "refs/tags/$TAG"
 test "$(git cat-file -t "$TAG")" = tag
 test "$(git rev-parse "$TAG^{commit}")" = "$SHA"
-git ls-remote --tags origin "refs/tags/$TAG" "refs/tags/$TAG^{}"
 ```
 
-远端普通 tag 行是 tag object SHA；**`refs/tags/$TAG^{}` 行才应等于已验证的 commit SHA**。
-现有 CI 也会被 tag push 触发；必须单独选择并验证 tag 运行，不能用同 SHA 的先前分支运行代替。
-不要创建与发布 tag 同名的分支；若列表为空，等待 tag 运行出现，不回退选择分支运行。
+随后打开仓库 **Actions → Release → Run workflow**：
 
-```bash
-gh run list --repo "$REPO" --workflow CI --event push --branch "$TAG" --commit "$SHA" \
-  --json databaseId,headSha,headBranch,status,conclusion,url
-TAG_RUN_ID=替换为上面tag推送运行ID
-gh run watch "$TAG_RUN_ID" --repo "$REPO" --exit-status
-test "$(gh run view "$TAG_RUN_ID" --repo "$REPO" --json headSha --jq .headSha)" = "$SHA"
-test "$(gh run view "$TAG_RUN_ID" --repo "$REPO" --json headBranch --jq .headBranch)" = "$TAG"
-test "$(gh run view "$TAG_RUN_ID" --repo "$REPO" --json conclusion --jq .conclusion)" = success
-```
+1. workflow ref 必须选择默认分支（当前为 `main`；其他 ref 会被拒绝），并输入已经存在的 `vVERSION` annotated tag。
+2. 可填写人工 change notes；留空时 GitHub 自动生成 changes，workflow 仍追加兼容性、已验证 SHA、运行 URL 与已知限制。
+3. RC 等带 `-suffix` 的版本自动发布为 prerelease 且 `latest=false`。稳定版必须显式勾选“manual terminal acceptance complete”；这只是确认输入，不是假装存在 environment approval gate。
 
-任何失败先停下调查；修复需要新 commit、新版本和新 tag，不用 force-push“修好”旧 tag。
+发布前，workflow 会在 `contents: read` job 中解析远端 annotated tag，checkout 准确 commit，核对 `package.json`、lockfile 顶层与 lock root 版本，并执行 `npm ci --ignore-scripts --no-audit --no-fund`、check、test、bench、regular/fullscreen PTY smoke。任何不一致都会阻止发布。执行仓库脚本的 job 没有写权限；通过后，独立 `contents: write` job 不 checkout、不执行项目脚本，只重新核对远端 tag object/SHA 并调用 `gh release create --verify-tag`。
 
-```bash
-# 用编辑器在仓库外创建说明文件，按第 8 节填写真实证据。
-NOTES="${TMPDIR:-/tmp}/pi-turn-fold-$VERSION-notes.md"
-"${EDITOR:-vi}" "$NOTES"
-gh release create "$TAG" --repo "$REPO" --verify-tag --draft --prerelease \
-  --title "pi-turn-fold $VERSION (Pi 0.85.1 only)" --notes-file "$NOTES"
-# 维护者核对草稿、远端 peeled SHA、CI 链接和风险声明后才执行：
-gh release edit "$TAG" --repo "$REPO" --draft=false --prerelease --latest=false
-gh release view "$TAG" --repo "$REPO" --json url,isDraft,isPrerelease,tagName
-```
-
-正式版另走完整准备/CI/tag 流程，设置 `VERSION=0.3.0`；创建草稿时去掉 `--prerelease`，
-最终执行 `gh release edit "$TAG" --repo "$REPO" --draft=false --prerelease=false --latest`。
-这是公开发布动作，不是 push 的隐式附带效果。流程中断后先检查远端状态，别盲目重跑创建命令。
+同一 tag 已有公开 Release 时安全跳过，不改 RC1/RC2 notes；已有 draft 时失败并要求人工审阅，不覆盖。stable 是否成为 Latest 交给 GitHub 的默认规则，避免盲目把较旧稳定版提升为 Latest。普通 push/PR 不会触发发布；本次源码变更本身也不会实际发布任何版本。无 build、二进制、npm 或私有 artifact 上传。
 
 ## 6. 用户安装、升级与本地路径
 
@@ -234,6 +185,5 @@ Pi 协调 Git ref 时可能 reset + clean checkout，并在存在 package.json �
 - write 无旧快照；截断内容不可恢复；不兼容其他 transcript renderer。
 ```
 
-默认决定：先 GitHub 手动发布，不上 npm。仅当需要 npm 搜索/registry 安装或确有用户需求时再申请 npm 名称、内容审计和凭据方案；若采用该渠道，npm 更新语义须按届时 Pi 版本另行核验。
-若人工发布频率真正成为负担，再单独批准最小 `workflow_dispatch` + 人工 environment gate；本轮不创建 workflow、不改权限或保护规则。
+默认决定：由维护者先手工准备版本与 immutable annotated tag，再用最小 `workflow_dispatch` 发布 GitHub Release；不上 npm，也不配置虚假的 environment approval gate。仅当需要 npm 搜索/registry 安装或确有用户需求时再申请 npm 名称、内容审计和凭据方案；若采用该渠道，npm 更新语义须按届时 Pi 版本另行核验。
 依据：原方案基线 package/CI/README、adapter 与测试；原方案编写时完整核对已安装 Pi 0.85.1 的 `docs/packages.md`、`quickstart.md`、`usage.md`，并读取 `dist/core/package-manager.js` 的 `checkForAvailableUpdates`、`getLocalGitUpdateTarget`、`installGit`、`updateGit`、`ensureGitRef` 实现。宿主升级后重新核对；上述实现核对为原方案记录。RC1 候选准备后，维护者独立复验并确认[分支 CI](https://github.com/mouse9527/pi-turn-fold/actions/runs/34137808216)与 [tag CI](https://github.com/mouse9527/pi-turn-fold/actions/runs/34138061325)均通过，随后公开预发布并验证固定 tag 安装。未来稳定分支策略尚未实施，人工终端/图片等未测边界仍见 Release notes。

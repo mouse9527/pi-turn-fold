@@ -166,6 +166,12 @@ FOLD_SMOKE_FULLSCREEN=1 python3 tests/smoke.py
 python3 tests/smoke.py /path/to/pi-coding-agent/dist/bundle/cli.js
 ```
 
+### Maintainer release
+
+Version bumps and immutable annotated tags remain manual. To publish an existing tag, open **Actions → Release → Run workflow**, keep the workflow ref on the default branch (`main` today), enter the `vVERSION` tag, and optionally supply human change notes. RC tags become prereleases; a stable tag also requires the explicit manual-terminal-acceptance checkbox.
+
+The workflow verifies the annotated tag, exact commit, package/lock versions, and all checks above before a separate publisher with `contents: write` creates the GitHub Release. Existing published releases are left unchanged; existing drafts require manual review. It never creates or moves tags, changes branches or local Pi installations, builds assets, or publishes npm. See [the release procedure](docs/release.md).
+
 Node 22.19+ and Python 3 are required for the checks; no test framework is added. Runtime Pi imports are supplied by Pi's extension loader, not bundled with this package. See [the adapter design and limitations](docs/design.md).
 
 ## 中文说明
