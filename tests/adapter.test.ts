@@ -337,9 +337,9 @@ test('official supervisor requests fold by exact type without mutating communica
     assert.equal(canonical.length, 2);
     let lines = mode.chatContainer.render(100).map(stripVTControlCharacters);
     assert.match(lines.join('\n'), /Attention · Supervisor 1 update · 1 alert · 1 reply/);
-    assert.match(lines.join('\n'), /control-notice-active_long_running/);
+    assert.match(lines.join('\n'), /Attention · Subagent 1 alert/);
     assert.match(lines.join('\n'), /supervisor-lookalike-visible/);
-    assert.doesNotMatch(lines.join('\n'), /supervisor-request-(?:update|decision)|control-notice-supervisor_request|supervisor-reply-decision/);
+    assert.doesNotMatch(lines.join('\n'), /supervisor-request-(?:update|decision)|control-notice-(?:supervisor_request|active_long_running)|supervisor-reply-decision/);
     const headerY = lines.findIndex((line: string) => line.includes('Supervisor 1 update'));
     assert.ok(mode.chatContainer.handleMouse({ type: 'click', button: 'left', x: 1, y: headerY, screenX: 1, screenY: headerY,
       width: 100, height: lines.length, shift: false, ctrl: false, alt: false })?.handled);
@@ -348,6 +348,10 @@ test('official supervisor requests fold by exact type without mutating communica
     assert.match(lines.join('\n'), /supervisor-native-expanded:control-notice-supervisor_request/);
     assert.match(lines.join('\n'), /supervisor-native-expanded:supervisor-request-decision/);
     assert.match(lines.join('\n'), /reply-native-expanded:supervisor-reply-decision/);
+    const controlY = lines.findIndex((line: string) => line.includes('Subagent 1 alert'));
+    assert.ok(mode.chatContainer.handleMouse({ type: 'click', button: 'left', x: 1, y: controlY, screenX: 1, screenY: controlY,
+      width: 100, height: lines.length, shift: false, ctrl: false, alt: false })?.handled);
+    assert.match(text(mode.chatContainer), /supervisor-native-expanded:control-notice-active_long_running/);
     assert.deepEqual([update, alert, decision, reply], saved, 'display folding never changes request IDs or reply metadata');
     assert.ok(canonical.every(component => (component as any)._expanded === false));
     adapter.setEnabled(false);
