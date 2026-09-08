@@ -4,6 +4,7 @@ import { Container, MouseRegion, Spacer, truncateToWidth, type Component, type T
 import { compact, statusColor, statusSymbol } from './presentation.ts';
 
 type NotificationStatus = 'running' | 'done' | 'error';
+type NotificationProtocol = 'tintinweb' | 'official';
 type NotificationDetails = Record<string, unknown>;
 type Host = {
   ui: TUI;
@@ -32,10 +33,24 @@ function messageOf(component: CustomMessageComponent): any {
   return (component as any).message;
 }
 
-export function isSubagentNotification(component: Component): component is CustomMessageComponent {
-  if (!(component instanceof CustomMessageComponent)) return false;
+function notificationProtocol(component: Component): NotificationProtocol | undefined {
+  if (!(component instanceof CustomMessageComponent)) return undefined;
   const message = messageOf(component);
-  return message?.display === true && message.customType === 'subagent-notification';
+  if (message?.display !== true) return undefined;
+  if (message.customType === 'subagent-notification') return 'tintinweb';
+  if (message.customType === 'subagent-notify') return 'official';
+}
+
+export function isSubagentNotification(component: Component): component is CustomMessageComponent {
+  return notificationProtocol(component) !== undefined;
+}
+
+/** Reuse the official package's renderer without parsing or mutating its canonical card. */
+function expandedNativeClone(component: CustomMessageComponent): CustomMessageComponent {
+  const source = component as any;
+  const clone = new CustomMessageComponent(source.message, source.customRenderer, source.markdownTheme, source.outputPad);
+  clone.setExpanded(true);
+  return clone;
 }
 
 function taskOf(component: CustomMessageComponent, details: NotificationDetails): Task {
@@ -124,26 +139,28 @@ class TaskView extends Container {
 /** A display-only run of adjacent visible subagent completion notifications. */
 export class SubagentGroup extends Container {
   readonly kind = 'subagents';
+  readonly protocol: NotificationProtocol;
   open = false;
   components: CustomMessageComponent[] = [];
   private host: Host;
   private tasks: Task[] = [];
   private rows = new Map<Task, TaskView>();
+  private nativeRows = new Map<CustomMessageComponent, CustomMessageComponent>();
   private version = 0;
   private seen = -1;
 
-  constructor(host: Host) { super(); this.host = host; }
+  constructor(host: Host, protocol: NotificationProtocol) { super(); this.host = host; this.protocol = protocol; }
 
   setComponents(components: CustomMessageComponent[]) {
-    if (this.rows.size) this.releaseRows();
+    if (this.rows.size || this.nativeRows.size) this.releaseRows();
     this.components = components;
-    this.tasks = components.flatMap(tasksOf);
+    this.tasks = this.protocol === 'tintinweb' ? components.flatMap(tasksOf) : [];
     this.version++;
   }
 
   add(component: CustomMessageComponent) {
     this.components.push(component);
-    this.tasks.push(...tasksOf(component));
+    if (this.protocol === 'tintinweb') this.tasks.push(...tasksOf(component));
     this.version++;
   }
 
@@ -166,6 +183,7 @@ export class SubagentGroup extends Container {
   }
 
   summary(): string {
+    if (this.protocol === 'official') return `Process · Subagent notifications ${this.components.length}`;
     let completed = 0, running = 0, failed = 0;
     for (const task of this.tasks) {
       if (task.status === 'done') completed++;
@@ -180,6 +198,7 @@ export class SubagentGroup extends Container {
   private releaseRows() {
     for (const row of this.rows.values()) row.release();
     this.rows.clear();
+    this.nativeRows.clear();
     this.clear();
   }
 
@@ -196,7 +215,12 @@ export class SubagentGroup extends Container {
       this.toggle();
       return { handled: true };
     }));
-    if (this.open) for (const task of this.tasks) {
+    if (this.open && this.protocol === 'official') for (const component of this.components) {
+      let row = this.nativeRows.get(component);
+      if (!row) { row = expandedNativeClone(component); this.nativeRows.set(component, row); }
+      this.addChild(row);
+    }
+    if (this.open && this.protocol === 'tintinweb') for (const task of this.tasks) {
       let row = this.rows.get(task);
       if (!row) { row = new TaskView(task, this.host); this.rows.set(task, row); }
       this.addChild(row);
@@ -220,32 +244,42 @@ export class SubagentProjection {
 
   append(canonical: Component, visible: Component | undefined) {
     if (!visible) return;
-    if (!isSubagentNotification(canonical)) { this.projection.addChild(visible); return; }
+    const protocol = notificationProtocol(canonical);
+    if (!protocol) { this.projection.addChild(visible); return; }
+    const component = canonical as CustomMessageComponent;
     const last = this.projection.children.at(-1);
-    const group = last instanceof SubagentGroup ? last : new SubagentGroup(this.host);
+    const group = last instanceof SubagentGroup && last.protocol === protocol ? last : new SubagentGroup(this.host, protocol);
     if (group !== last) { this.groups.add(group); this.projection.addChild(group); }
-    group.add(canonical);
-    this.groupOf.set(canonical, group);
+    group.add(component);
+    this.groupOf.set(component, group);
   }
 
   reconcile(children: Component[], project: (child: Component) => Component | undefined) {
     const output: Component[] = [];
     const used = new Set<SubagentGroup>();
     let run: CustomMessageComponent[] = [];
+    let runProtocol: NotificationProtocol | undefined;
     const flush = () => {
-      if (!run.length) return;
-      let group = run.map(component => this.groupOf.get(component)).find(candidate => candidate && !used.has(candidate));
-      if (!group) group = new SubagentGroup(this.host);
+      if (!run.length || !runProtocol) return;
+      const protocol = runProtocol;
+      const reusable = run.map(component => this.groupOf.get(component))
+        .find(candidate => candidate?.protocol === protocol && !used.has(candidate));
+      const group = reusable ?? new SubagentGroup(this.host, protocol);
       group.setComponents(run);
       used.add(group);
       output.push(group);
       run = [];
+      runProtocol = undefined;
     };
     for (const child of children) {
       const visible = project(child);
       if (!visible) continue;
-      if (isSubagentNotification(child)) run.push(child);
-      else { flush(); output.push(visible); }
+      const protocol = notificationProtocol(child);
+      if (protocol) {
+        if (runProtocol && runProtocol !== protocol) flush();
+        runProtocol = protocol;
+        run.push(child as CustomMessageComponent);
+      } else { flush(); output.push(visible); }
     }
     flush();
     for (const group of this.groups) if (!used.has(group)) group.dispose();

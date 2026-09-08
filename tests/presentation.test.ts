@@ -41,6 +41,10 @@ test('exact subagent tools share one category while actions and bounded targets 
     ['SubagentWorkflow', { title: 'release checks', scriptPath: '/tmp/ignored.ts', script: hugePrompt }, 'workflow', 'release checks'],
     ['get_subagent_result', { agent_id: 'agent-123' }, 'result', 'agent-123'],
     ['steer_subagent', { agent_id: 'agent-123', message: hugeMessage }, 'steer', 'agent-123'],
+    ['subagent', { agent: 'scout', task: hugePrompt }, 'agent', 'scout'],
+    ['subagent', { workflowScript: hugePrompt }, 'workflow', ''],
+    ['subagent', { workflowScriptPath: '/tmp/review.js' }, 'workflow', '/tmp/review.js'],
+    ['subagent', { action: 'steer', id: 'run-456', message: hugeMessage }, 'steer', 'run-456'],
   ] as const;
   for (const [index, [name, args, action, target]] of cases.entries()) {
     const tool = turn.tool(String(index), name, args);
@@ -52,12 +56,12 @@ test('exact subagent tools share one category while actions and bounded targets 
     assert.equal(tool.args, args);
     assert.equal(tool.result, success);
   }
-  for (const name of ['agent', 'AgentResume', 'SubagentWorkflowExtra', 'get_subagent_results', 'steer-subagent']) {
+  for (const name of ['agent', 'AgentResume', 'SubagentWorkflowExtra', 'get_subagent_results', 'steer-subagent', 'subagent-extra']) {
     const tool = turn.tool(`other-${name}`, name, { query: 'visible' });
     assert.equal(toolCategory(tool), 'Other');
   }
   const group = turn.groupOf.get(turn.tools.get('0')!)!;
-  assert.equal(group.summary(false), 'Unfinished · Subagent 6 · Other 5 · 5 unfinished');
+  assert.equal(group.summary(false), 'Unfinished · Subagent 10 · Other 6 · 6 unfinished');
 });
 
 test('pending, parallel starts, out-of-order and corrected results maintain current operation and failure maps', () => {

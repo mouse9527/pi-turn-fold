@@ -24,6 +24,8 @@ const notification = (id: string, status: string, details: Record<string, unknow
   Object.defineProperties(saved, Object.getOwnPropertyDescriptors(details));
   return { role: 'custom', customType: 'subagent-notification', content: `native-notification-${id}`, display: true, timestamp: 4, details: saved };
 };
+const officialNotification = (id: string, display = true) => ({ role: 'custom', customType: 'subagent-notify',
+  content: `official-notification-${id}`, display, timestamp: 4 });
 const custom = (customType: string, content: string) => ({ role: 'custom', customType, content, display: true, timestamp: 4 });
 
 // Keep all display/control methods on the actual installed prototype. Only dependencies are stubbed.
@@ -41,7 +43,10 @@ function host() {
     settingsManager: { getShowImages: () => false, getImageWidthCells: () => 60, getCodeBlockIndent: () => '  ',
       getShowCacheMissNotices: () => false, getShowTerminalProgress: () => true },
     sessionManager: { getCwd: () => process.cwd(), getEntries: () => [] },
-    extensionRunner: { getMarkdownTransformers: () => [], getMessageRenderer: () => undefined,
+    extensionRunner: { getMarkdownTransformers: () => [],
+      getMessageRenderer: (name: string) => name === 'subagent-notify'
+        ? (message: any, options: any) => new Text(`official-native-${options.expanded ? 'expanded' : 'collapsed'}:${message.content}`, 0, 0)
+        : undefined,
       getEntryRenderer: (name: string) => name === 'test-entry' ? () => new Text('custom-entry-visible', 0, 0) : undefined },
     getToolDefinition: () => definition, getSteeringMessages: () => [], getFollowUpMessages: () => [], retryAttempt: 0,
   };
@@ -250,6 +255,51 @@ test('live and historical exact notification components fold without replacing c
     assert.ok(historicalNative.every((child: any) => mode.chatContainer.children.includes(child)));
     assert.match(text(mode.chatContainer), /native-notification-history-a/);
     assert.doesNotMatch(text(mode.chatContainer), /Process · Subagents/);
+  } finally { adapter.dispose(true); }
+});
+
+test('official pi-subagents notifications fold by exact type and expand through its native renderer', () => {
+  const { mode } = host();
+  const adapter = installAdapter();
+  try {
+    mode.addMessageToChat(officialNotification('a'));
+    mode.addMessageToChat(officialNotification('b'));
+    mode.addMessageToChat(custom('subagent-notify-extra', 'official-lookalike-visible'));
+    mode.addMessageToChat(notification('community', 'completed'));
+    const canonical = mode.chatContainer.children.filter((child: any) =>
+      child instanceof CustomMessageComponent && (child as any).message?.customType === 'subagent-notify') as CustomMessageComponent[];
+    assert.equal(canonical.length, 2);
+    assert.ok(canonical.every(component => (component as any)._expanded === false));
+    let lines = mode.chatContainer.render(100).map(stripVTControlCharacters);
+    const folded = lines.join('\n');
+    assert.match(folded, /Process · Subagent notifications 2/);
+    assert.match(folded, /official-lookalike-visible/);
+    assert.match(folded, /Process · Subagents 1 completed/);
+    assert.doesNotMatch(folded, /official-native-|official-notification-[ab]/);
+    const headerY = lines.findIndex((line: string) => line.includes('Subagent notifications'));
+    const event = { type: 'click' as const, button: 'left' as const, x: 1, y: headerY, screenX: 1, screenY: headerY,
+      width: 100, height: lines.length, shift: false, ctrl: false, alt: false };
+    assert.ok(mode.chatContainer.handleMouse(event)?.handled);
+    lines = mode.chatContainer.render(100).map(stripVTControlCharacters);
+    assert.match(lines.join('\n'), /official-native-expanded:official-notification-a/);
+    assert.match(lines.join('\n'), /official-native-expanded:official-notification-b/);
+    assert.ok(canonical.every(component => (component as any)._expanded === false), 'projection clones never mutate canonical cards');
+    mode.chatContainer.removeChild(canonical[0]);
+    const reconciled = text(mode.chatContainer);
+    assert.match(reconciled, /Process · Subagent notifications 1/);
+    assert.doesNotMatch(reconciled, /official-notification-a/);
+    assert.match(reconciled, /official-native-expanded:official-notification-b/);
+    adapter.setEnabled(false);
+    const native = text(mode.chatContainer);
+    assert.match(native, /official-native-collapsed:official-notification-b/);
+    assert.doesNotMatch(native, /official-notification-a|Subagent notifications/);
+    adapter.setEnabled(true);
+    assert.match(text(mode.chatContainer), /Process · Subagent notifications 1/);
+    assert.doesNotMatch(text(mode.chatContainer), /official-native-expanded/);
+    mode.chatContainer.clear();
+    mode.renderSessionItems([officialNotification('history')]);
+    assert.match(text(mode.chatContainer), /Process · Subagent notifications 1/);
+    assert.doesNotMatch(text(mode.chatContainer), /official-notification-history/);
   } finally { adapter.dispose(true); }
 });
 
