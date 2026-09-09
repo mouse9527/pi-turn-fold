@@ -29,11 +29,17 @@ export function toolAction(tool: Tool): string {
   }
   return knownTools.get(tool.name)?.[1] ?? compact(tool.name);
 }
+/** Bounded, human-authored labels only; never the workflow script or task payload. */
+function field(value: unknown, key: string): unknown {
+  return value && typeof value === 'object' ? (value as Record<string, unknown>)[key] : undefined;
+}
+
 export function toolTarget(tool: Tool): string {
   const values = tool.name === 'Agent' ? [tool.args.description, tool.args.name, tool.args.resume]
     : tool.name === 'SubagentWorkflow' ? [tool.args.name, tool.args.title, tool.args.scriptPath]
     : tool.name === 'get_subagent_result' || tool.name === 'steer_subagent' ? [tool.args.agent_id]
-    : tool.name === 'subagent' ? [tool.args.agent, tool.args.id, tool.args.name, tool.args.topic, tool.args.workflowScriptPath]
+    : tool.name === 'subagent' ? [tool.args.agent, tool.args.id, tool.args.name, tool.args.topic, tool.args.workflowScriptPath,
+      tool.args.workflow, field(tool.args.lane, 'key'), field(tool.args.mission, 'title'), field(tool.args.mission, 'summary')]
     : tool.name === 'subagent_supervisor' ? [tool.args.replyTo, tool.args.to]
     : [tool.args.path, tool.args.file_path, tool.args.command, tool.args.query];
   const value = values.find(value => typeof value === 'string' && value);
@@ -81,8 +87,17 @@ export function refreshPresentation(tool: Tool, result: Result, partial: boolean
   }
 }
 
+/** Declared workflow lanes are a bounded display hint, not parsed from the script. */
+function workflowLanes(tool: Tool): number | undefined {
+  if (tool.name !== 'subagent') return undefined;
+  const lanes = field(tool.args.preflight, 'lanes');
+  return Array.isArray(lanes) && lanes.length ? lanes.length : undefined;
+}
+
 export function toolRow(tool: Tool): string {
   let label = `${statusSymbol[tool.status]} ${toolAction(tool)} ${toolTarget(tool)}`.trimEnd();
+  const lanes = workflowLanes(tool);
+  if (lanes !== undefined) label += ` · ${lanes} lane${lanes === 1 ? '' : 's'}`;
   if (tool.status === 'done' && tool.diffStats) label += ` +${tool.diffStats.added} −${tool.diffStats.removed}`;
   if (tool.errorSummary) label += ` · ${tool.errorSummary}`;
   if (tool.truncated) label += ' · output truncated';

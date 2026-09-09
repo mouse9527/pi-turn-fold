@@ -61,6 +61,9 @@ test('exact subagent tools share one category while actions and bounded targets 
     ['steer_subagent', { agent_id: 'agent-123', message: hugeMessage }, 'steer', 'agent-123'],
     ['subagent', { agent: 'scout', task: hugePrompt }, 'agent', 'scout'],
     ['subagent', { workflowScript: hugePrompt }, 'workflow', ''],
+    ['subagent', { workflowScript: hugePrompt, mission: { title: 'ledger backfill' } }, 'workflow', 'ledger backfill'],
+    ['subagent', { workflowScript: hugePrompt, lane: { version: 1, key: 'batch-ledger' }, mission: { title: 'ignored when lane wins' } }, 'workflow', 'batch-ledger'],
+    ['subagent', { workflow: 'review', args: { task: hugePrompt } }, 'workflow', 'review'],
     ['subagent', { workflowScriptPath: '/tmp/review.js' }, 'workflow', '/tmp/review.js'],
     ['subagent', { action: 'steer', id: 'run-456', message: hugeMessage }, 'steer', 'run-456'],
     ['subagent_supervisor', { action: 'pending' }, 'pending', ''],
@@ -81,7 +84,11 @@ test('exact subagent tools share one category while actions and bounded targets 
     assert.equal(toolCategory(tool), 'Other');
   }
   const group = turn.groupOf.get(turn.tools.get('0')!)!;
-  assert.equal(group.summary(false), 'Unfinished · Subagent 12 · Other 6 · 6 unfinished');
+  assert.equal(group.summary(false), 'Unfinished · Subagent 15 · Other 6 · 6 unfinished');
+  const lanes = turn.tool('lanes', 'subagent', { workflowScript: hugePrompt, mission: { title: 'parallel review' },
+    preflight: { version: 1, lanes: [{ key: 'a' }, { key: 'b' }, { key: 'c' }] } });
+  assert.equal(toolRow(lanes), '○ workflow parallel review · 3 lanes');
+  assert.doesNotMatch(toolRow(lanes), /PROMPT-MARKER/);
 });
 
 test('failed groups keep only the diagnostic line red', () => {
