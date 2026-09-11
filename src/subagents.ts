@@ -87,10 +87,6 @@ function countedState(protocol: NotificationProtocol, components: Component[]): 
   }
 }
 
-export function isFoldedSubagentMessage(message: unknown): boolean {
-  return messageProtocol(message) !== undefined;
-}
-
 function notificationProtocol(component: Component): NotificationProtocol | undefined {
   return component instanceof CustomMessageComponent ? messageProtocol(messageOf(component))
     : entryOf(component)?.customType === 'subagent_supervisor_reply' ? 'supervisor' : undefined;

@@ -409,6 +409,22 @@ test('remaining official lifecycle cards fold by exact type while user-requested
   } finally { adapter.dispose(true); }
 });
 
+test('slash-command output stays in place instead of pinning below later assistant text', () => {
+  const { mode } = host();
+  const adapter = installAdapter();
+  try {
+    mode.addMessageToChat(user('command-user'));
+    mode.addMessageToChat(assistant([{ type: 'text', text: 'assistant-before-command' }]));
+    // Real /session output: direct Spacer + Text children of the chat container.
+    mode.chatContainer.addChild(new Text('session-info-visible', 1, 0));
+    mode.addMessageToChat(assistant([{ type: 'text', text: 'assistant-after-command' }]));
+    const visible = text(mode.chatContainer);
+    const order = ['assistant-before-command', 'session-info-visible', 'assistant-after-command']
+      .map(label => visible.indexOf(label));
+    assert.ok(order.every(index => index >= 0) && order[0] < order[1] && order[1] < order[2], visible);
+  } finally { adapter.dispose(true); }
+});
+
 test('visible async subagent messages preserve chronology around assistant replies', () => {
   const { mode } = host();
   const adapter = installAdapter();
