@@ -260,7 +260,6 @@ export class TurnView extends Container {
   host: ViewHost;
   groups = new Map<ProcessGroup, ProcessView>();
   private content = new Container();
-  private alerts = new Container();
   private nextSegment = 0;
   private nextWarning = 0;
 
@@ -269,7 +268,6 @@ export class TurnView extends Container {
     this.turn = turn;
     this.host = host;
     this.addChild(this.content);
-    this.addChild(this.alerts);
   }
 
   get open() { return [...this.groups.values()].some(group => group.open); }
@@ -306,7 +304,6 @@ export class TurnView extends Container {
     for (const group of this.groups.values()) group.release();
     this.groups.clear();
     this.content.clear();
-    this.alerts.clear();
     this.clear();
   }
 
@@ -320,8 +317,9 @@ export class TurnView extends Container {
         this.content.addChild(group);
       } else this.content.addChild(new AssistantTextView(segment, this.host));
     }
+    // Warnings join the stream where they happened; a later retry must render below them.
     while (this.nextWarning < this.turn.warnings.length) {
-      this.alerts.addChild(new Text(`⚠ ${stripVTControlCharacters(this.turn.warnings[this.nextWarning++])}`, 1, 0));
+      this.content.addChild(new Text(`⚠ ${stripVTControlCharacters(this.turn.warnings[this.nextWarning++])}`, 1, 0));
     }
   }
 
