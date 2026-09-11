@@ -25,6 +25,48 @@ function line(text: () => string, style: (text: string) => string = text => text
   };
 }
 
+/** Saved input stays available but collapsed so the native card reads first. */
+class ArgumentsView extends Container {
+  open = false;
+  private args: () => Record<string, unknown>;
+  private host: ViewHost;
+  private text?: Text;
+
+  constructor(args: () => Record<string, unknown>, host: ViewHost) {
+    super();
+    this.args = args;
+    this.host = host;
+    this.rebuild();
+  }
+
+  toggle() {
+    this.open = !this.open;
+    this.rebuild();
+    this.host.ui.requestRender(true);
+  }
+
+  refresh() {
+    if (this.open && this.text) this.text.setText(this.body());
+  }
+
+  // Serializing megabyte arguments is deferred until this row is actually opened.
+  private body(): string {
+    return `Arguments\n${JSON.stringify(this.args(), null, 2)}`;
+  }
+
+  private rebuild() {
+    this.clear();
+    this.addChild(new MouseRegion(line(() => `    ${this.open ? '▾' : '▸'} Arguments`,
+      text => this.host.color?.('muted', text) ?? text), event => {
+      if (event.type !== 'click' || event.button !== 'left') return;
+      this.toggle();
+      return { handled: true };
+    }));
+    this.text = this.open ? new Text(this.body(), 4, 0) : undefined;
+    if (this.text) this.addChild(this.text);
+  }
+}
+
 /** A lightweight row. Native markdown/diff/image renderers exist only while open. */
 export class ItemView extends Container {
   item: Item;
@@ -33,7 +75,7 @@ export class ItemView extends Container {
   private seen = -1;
   private detail?: Component;
   private native?: ToolExecutionComponent;
-  private argumentsText?: Text;
+  private argumentsView?: ArgumentsView;
   private alive?: { value: boolean };
 
   constructor(item: Item, host: ViewHost) {
@@ -55,7 +97,7 @@ export class ItemView extends Container {
     this.alive = undefined;
     this.detail = undefined;
     this.native = undefined;
-    this.argumentsText = undefined;
+    this.argumentsView = undefined;
     this.seen = -1;
   }
 
@@ -76,9 +118,6 @@ export class ItemView extends Container {
 
   private toolDetail(tool: Tool): Component {
     const box = new Container();
-    // Native edit rendering omits some arguments; keep an exact saved-input inspector.
-    this.argumentsText = new Text(`Arguments\n${JSON.stringify(tool.args, null, 2)}`, 2, 0);
-    box.addChild(this.argumentsText);
     let definition = this.host.toolDefinition(tool.name);
     if (tool.name === 'edit' && definition?.renderCall) {
       const renderCall = definition.renderCall;
@@ -93,6 +132,9 @@ export class ItemView extends Container {
     native.setExpanded(true);
     if (tool.result) native.updateResult(tool.result, tool.status === 'running');
     box.addChild(native);
+    // Native edit rendering omits some arguments; keep an exact saved-input inspector, collapsed.
+    this.argumentsView = new ArgumentsView(() => this.item.kind === 'tool' ? this.item.args : tool.args, this.host);
+    box.addChild(this.argumentsView);
     if (tool.name === 'write') box.addChild(new Text('Saved write content; no before-file snapshot or historical diff is implied.', 2, 0));
     return box;
   }
@@ -101,7 +143,7 @@ export class ItemView extends Container {
     if (this.open && this.seen !== this.item.revision) {
       if (this.item.kind === 'tool' && this.native) {
         // Retain native renderer state/lastComponent, including its nested disclosure state.
-        this.argumentsText!.setText(`Arguments\n${JSON.stringify(this.item.args, null, 2)}`);
+        this.argumentsView?.refresh();
         this.native.updateArgs(this.item.args);
         if (this.item.result) this.native.updateResult(this.item.result, this.item.status === 'running');
       } else {
