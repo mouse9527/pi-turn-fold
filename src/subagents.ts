@@ -4,7 +4,7 @@ import { Container, MouseRegion, Spacer, truncateToWidth, type Component, type T
 import { compact, statusColor, statusSymbol } from './presentation.ts';
 
 type NotificationStatus = 'running' | 'done' | 'error';
-type NotificationProtocol = 'tintinweb' | 'official' | 'supervisor' | 'control' | 'steering' | 'watchdog' | 'wait' | 'command';
+type NotificationProtocol = 'tintinweb' | 'official' | 'supervisor' | 'control' | 'steering' | 'watchdog' | 'wait' | 'command' | 'children';
 type GroupState = { summary: string; status: NotificationStatus };
 type NotificationDetails = Record<string, unknown>;
 type Host = {
@@ -49,6 +49,8 @@ function messageProtocol(message: any): NotificationProtocol | undefined {
   if (message.customType === 'subagent_watchdog_warning') return 'watchdog';
   if (message.customType === 'subagent-wait-subscription') return 'wait';
   if (message.customType === 'subagent-slash-result') return 'command';
+  // Official 0.67.0 sends these without details and only for non-completed outcomes.
+  if (message.customType === 'subagent-incremental-child-notify') return 'children';
 }
 
 const plural = (count: number, word: string) => `${count} ${word}${count === 1 ? '' : 's'}`;
@@ -59,6 +61,7 @@ function countedState(protocol: NotificationProtocol, components: Component[]): 
   const details = () => components.map(component => messageOf(component)?.details);
   if (protocol === 'official') return { summary: `Process · Subagent notifications ${count}`, status: 'done' };
   if (protocol === 'control') return { summary: `Attention · Subagent ${plural(count, 'alert')}`, status: 'running' };
+  if (protocol === 'children') return { summary: `Attention · Workflow ${plural(count, 'child alert')}`, status: 'running' };
   if (protocol === 'steering') {
     const recovered = details().filter(value => value?.state === 'recovered').length;
     const failed = count - recovered;

@@ -385,6 +385,9 @@ test('remaining official lifecycle cards fold by exact type while user-requested
     mode.addMessageToChat(lifecycle('subagent-wait-subscription', 'wait-ok', { outcome: 'completed' }));
     mode.addMessageToChat(lifecycle('subagent-wait-subscription', 'wait-late', { outcome: 'timed out' }));
     mode.addMessageToChat(lifecycle('subagent-slash-result', 'models', { result: { isError: false } }));
+    // Official 0.67.0 emits these with no details and no registered renderer.
+    mode.addMessageToChat({ role: 'custom', customType: 'subagent-incremental-child-notify',
+      content: 'lifecycle-child-failed', display: true, timestamp: 4 });
     mode.addMessageToChat(custom('subagent-slash-text-result', 'user-requested-status-visible'));
     mode.addMessageToChat(custom('subagents-admin', 'user-requested-admin-visible'));
     const folded = text(mode.chatContainer);
@@ -392,6 +395,7 @@ test('remaining official lifecycle cards fold by exact type while user-requested
     assert.match(folded, /Blocked · Watchdog 1 blocker · 1 concern/);
     assert.match(folded, /Attention · Subagent waits 1 completed · 1 alert/);
     assert.match(folded, /Process · Subagent 1 command/);
+    assert.match(folded, /Attention · Workflow 1 child alert/);
     assert.match(folded, /user-requested-status-visible/);
     assert.match(folded, /user-requested-admin-visible/);
     assert.doesNotMatch(folded, /lifecycle-/);
