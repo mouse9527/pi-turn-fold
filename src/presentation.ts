@@ -23,9 +23,12 @@ export function compact(value: string, limit = 160): string {
 export function toolCategory(tool: Tool): Category { return knownTools.get(tool.name)?.[0] ?? 'Other'; }
 export function toolAction(tool: Tool): string {
   if (tool.name === 'Agent' && typeof tool.args.resume === 'string' && tool.args.resume) return 'resume';
+  // Keep the tool name so a bare management verb like `status` stays attributable.
   if (tool.name === 'subagent' || tool.name === 'subagent_supervisor') {
-    if (typeof tool.args.action === 'string' && tool.args.action) return compact(tool.args.action);
-    if (tool.name === 'subagent' && (tool.args.workflowScript || tool.args.workflowScriptPath || tool.args.workflow)) return 'workflow';
+    const action = typeof tool.args.action === 'string' && tool.args.action ? compact(tool.args.action)
+      : tool.name === 'subagent' && (tool.args.workflowScript || tool.args.workflowScriptPath || tool.args.workflow) ? 'workflow'
+      : '';
+    return action ? `${tool.name} ${action}` : tool.name;
   }
   return knownTools.get(tool.name)?.[1] ?? compact(tool.name);
 }
