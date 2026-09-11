@@ -295,6 +295,18 @@ test('native spacer leaves exactly one blank line from assistant text to process
   }
 });
 
+test('turn warnings stay where they happened, not pinned below a later retry', () => {
+  const turn = new Turn();
+  const view = new TurnView(turn, host);
+  turn.running = true;
+  turn.endAssistant({ ...assistant([text('partial before timeout')], 'error'), errorMessage: 'Request timed out.' });
+  assert.match(render(view), /Request timed out/);
+  turn.endAssistant(assistant([text('retried answer after timeout')]));
+  const visible = render(view);
+  assert.ok(visible.indexOf('Request timed out') < visible.indexOf('retried answer after timeout'), visible);
+  view.dispose();
+});
+
 test('visible text transformers receive live and finalized streaming flags', () => {
   const flags: boolean[] = [];
   const turn = new Turn();
