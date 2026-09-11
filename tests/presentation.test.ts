@@ -63,15 +63,16 @@ test('exact subagent tools share one category while actions and bounded targets 
     ['SubagentWorkflow', { title: 'release checks', scriptPath: '/tmp/ignored.ts', script: hugePrompt }, 'workflow', 'release checks'],
     ['get_subagent_result', { agent_id: 'agent-123' }, 'result', 'agent-123'],
     ['steer_subagent', { agent_id: 'agent-123', message: hugeMessage }, 'steer', 'agent-123'],
-    ['subagent', { agent: 'scout', task: hugePrompt }, 'agent', 'scout'],
-    ['subagent', { workflowScript: hugePrompt }, 'workflow', ''],
-    ['subagent', { workflowScript: hugePrompt, mission: { title: 'ledger backfill' } }, 'workflow', 'ledger backfill'],
-    ['subagent', { workflowScript: hugePrompt, lane: { version: 1, key: 'batch-ledger' }, mission: { title: 'ignored when lane wins' } }, 'workflow', 'batch-ledger'],
-    ['subagent', { workflow: 'review', args: { task: hugePrompt } }, 'workflow', 'review'],
-    ['subagent', { workflowScriptPath: '/tmp/review.js' }, 'workflow', '/tmp/review.js'],
-    ['subagent', { action: 'steer', id: 'run-456', message: hugeMessage }, 'steer', 'run-456'],
-    ['subagent_supervisor', { action: 'pending' }, 'pending', ''],
-    ['subagent_supervisor', { action: 'reply', replyTo: 'request-789', message: hugeMessage }, 'reply', 'request-789'],
+    ['subagent', { agent: 'scout', task: hugePrompt }, 'subagent', 'scout'],
+    ['subagent', { workflowScript: hugePrompt }, 'subagent workflow', ''],
+    ['subagent', { workflowScript: hugePrompt, mission: { title: 'ledger backfill' } }, 'subagent workflow', 'ledger backfill'],
+    ['subagent', { workflowScript: hugePrompt, lane: { version: 1, key: 'batch-ledger' }, mission: { title: 'ignored when lane wins' } }, 'subagent workflow', 'batch-ledger'],
+    ['subagent', { workflow: 'review', args: { task: hugePrompt } }, 'subagent workflow', 'review'],
+    ['subagent', { workflowScriptPath: '/tmp/review.js' }, 'subagent workflow', '/tmp/review.js'],
+    ['subagent', { action: 'steer', id: 'run-456', message: hugeMessage }, 'subagent steer', 'run-456'],
+    ['subagent', { action: 'status', id: 'run-456' }, 'subagent status', 'run-456'],
+    ['subagent_supervisor', { action: 'pending' }, 'subagent_supervisor pending', ''],
+    ['subagent_supervisor', { action: 'reply', replyTo: 'request-789', message: hugeMessage }, 'subagent_supervisor reply', 'request-789'],
   ] as const;
   for (const [index, [name, args, action, target]] of cases.entries()) {
     const tool = turn.tool(String(index), name, args);
@@ -88,10 +89,10 @@ test('exact subagent tools share one category while actions and bounded targets 
     assert.equal(toolCategory(tool), 'Other');
   }
   const group = turn.groupOf.get(turn.tools.get('0')!)!;
-  assert.equal(group.summary(false), 'Unfinished · Subagent 15 · Other 6 · 6 unfinished');
+  assert.equal(group.summary(false), 'Unfinished · Subagent 16 · Other 6 · 6 unfinished');
   const lanes = turn.tool('lanes', 'subagent', { workflowScript: hugePrompt, mission: { title: 'parallel review' },
     preflight: { version: 1, lanes: [{ key: 'a' }, { key: 'b' }, { key: 'c' }] } });
-  assert.equal(toolRow(lanes), '○ workflow parallel review · 3 lanes');
+  assert.equal(toolRow(lanes), '○ subagent workflow parallel review · 3 lanes');
   assert.doesNotMatch(toolRow(lanes), /PROMPT-MARKER/);
 });
 
