@@ -92,7 +92,12 @@ test('inline dispatch reaches saved edit and nested native details without losin
   };
   assert.ok(dispatch('Working · Edit 1 · Other 1')?.handled, 'group header opens while custom activity stays hidden');
   assert.ok(dispatch('✓ edit')?.handled);
-  assert.match(lines().join('\n'), /Arguments[\s\S]*oldText[\s\S]*-1 before[\s\S]*\+1 after/);
+  assert.match(lines().join('\n'), /-1 before[\s\S]*\+1 after/, 'the native saved diff reads first');
+  assert.doesNotMatch(lines().join('\n'), /oldText/, 'saved arguments stay collapsed by default');
+  assert.ok(dispatch('▸ Arguments')?.handled);
+  assert.match(lines().join('\n'), /Arguments[\s\S]*oldText/);
+  assert.ok(dispatch('▾ Arguments')?.handled);
+  assert.doesNotMatch(lines().join('\n'), /oldText/);
   assert.equal(view.rows.get(edit)?.open, true);
   assert.ok(dispatch('… custom-agent')?.handled);
   assert.ok(dispatch('▸ saved child invocation')?.handled);

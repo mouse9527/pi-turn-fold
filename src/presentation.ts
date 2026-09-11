@@ -41,7 +41,10 @@ export function toolTarget(tool: Tool): string {
     : tool.name === 'subagent' ? [tool.args.agent, tool.args.id, tool.args.name, tool.args.topic, tool.args.workflowScriptPath,
       tool.args.workflow, field(tool.args.lane, 'key'), field(tool.args.mission, 'title'), field(tool.args.mission, 'summary')]
     : tool.name === 'subagent_supervisor' ? [tool.args.replyTo, tool.args.to]
-    : [tool.args.path, tool.args.file_path, tool.args.command, tool.args.query];
+    // Unknown/MCP tools: prefer their own short identifying fields over an empty row.
+    : [tool.args.path, tool.args.file_path, tool.args.command, tool.args.query,
+      tool.args.tool, tool.args.server, tool.args.search, tool.args.describe, tool.args.action,
+      tool.args.url, tool.args.name, tool.args.id];
   const value = values.find(value => typeof value === 'string' && value);
   return typeof value === 'string' ? compact(value) : '';
 }

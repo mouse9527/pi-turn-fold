@@ -32,6 +32,10 @@ test('fixed categories count calls, preserve builtin actions and unknown names, 
   assert.equal(group.summary(false), 'Process · Read 3 · Search 3 · Run 2 · Edit 2 · Subagent 1 · Other 1');
   assert.equal(group.activity(turn.running), '');
   assert.match(toolRow(turn.tools.get('10')!), /✓ mcp__read same.ts/);
+  const proxy = turn.tool('proxy', 'mcp', { tool: 'jenkins_get_running_builds', args: { deep: 'ignored' } });
+  assert.match(toolRow(proxy), /○ mcp jenkins_get_running_builds/);
+  assert.match(toolRow(turn.tool('namespace', 'mcp__jenkins', { tool: 'jenkins_get_build' })), /○ mcp__jenkins jenkins_get_build/);
+  assert.match(toolRow(turn.tool('listing', 'mcp', { server: 'gitee' })), /○ mcp gitee/);
   assert.match(toolRow(turn.tools.get('6')!), /✓ write same.ts/);
   assert.match(toolRow(turn.tools.get('8')!), /✓ find same.ts/);
   assert.match(toolRow(turn.tools.get('9')!), /✓ ls same.ts/);
