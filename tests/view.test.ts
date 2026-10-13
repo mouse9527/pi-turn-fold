@@ -64,9 +64,10 @@ test('inline dispatch reaches saved edit and nested native details without losin
   turn.result(custom, { content: [{ type: 'text', text: 'saved nested output' }], isError: false }, true);
   const view = new TurnView(turn, { ...host, toolDefinition: name => name === 'edit' ? editDefinition : {
     name: 'custom-agent', label: 'Custom', description: 'Synthetic saved nested renderer', parameters: {} as any,
-    execute: async () => { executions++; return { content: [] }; },
+    execute: async () => { executions++; return { content: [], details: undefined }; },
     renderCall: () => new Text('registered parent renderer', 0, 0),
-    renderResult: (...[result, _options, _theme, context]: Parameters<NonNullable<typeof editDefinition.renderResult>>) => {
+    // Pi types this context against the definition's own parameters, which this stub omits.
+    renderResult: (...[result, _options, _theme, context]: any[]) => {
       const child = context.lastComponent as typeof nested ?? {
         open: false, saved: '',
         render() { return [`${this.open ? '▾' : '▸'} saved child invocation`,

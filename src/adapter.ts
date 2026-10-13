@@ -10,8 +10,22 @@ type Host = any;
 type Method = (this: any, ...args: any[]) => any;
 const owner = Symbol.for('pi-turn-fold.adapter');
 
+// The patches below are validated against the pinned devDependency release, so older hosts are
+// refused. Newer releases are attempted: patch() and capture() already throw when a needed member
+// is renamed or gone, and a non-numeric suffix such as "-rc.1" never raises this floor.
+const MIN_SUPPORTED_PI = '1.2.0';
+
+function belowMinVersion(version: string) {
+  const parts = (value: string) => value.split('.').map(part => Number.parseInt(part, 10) || 0);
+  const [found, minimum] = [parts(version), parts(MIN_SUPPORTED_PI)];
+  for (let index = 0; index < Math.max(found.length, minimum.length); index++) {
+    if ((found[index] ?? 0) !== (minimum[index] ?? 0)) return (found[index] ?? 0) < (minimum[index] ?? 0);
+  }
+  return false;
+}
+
 export function installAdapter(version = VERSION) {
-  if (version !== '0.85.1') throw new Error(`pi-turn-fold supports Pi 0.85.1 only (found ${version})`);
+  if (belowMinVersion(version)) throw new Error(`pi-turn-fold requires Pi ${MIN_SUPPORTED_PI} or newer (found ${version})`);
   const proto = InteractiveMode.prototype as any;
   if (proto[owner]) throw new Error('pi-turn-fold is already loaded');
   const undo: (() => void)[] = [];
@@ -163,10 +177,10 @@ export function installAdapter(version = VERSION) {
     for (const child of mode.chatContainer.children) {
       if (!hidden.has(child)) continue;
       // Avoid historical edit preview while restoring the native display.
+      // updateDisplay rebuilds Pi's image components and registers its PNG transcoder.
       if (child instanceof ToolExecutionComponent) {
         (child as any).argsComplete = false;
         (child as any).updateDisplay();
-        (child as any).maybeConvertImagesForKitty();
       } else if (child instanceof AssistantMessageComponent) child.invalidate();
     }
   }
@@ -176,7 +190,7 @@ export function installAdapter(version = VERSION) {
     if (enabled === value) return true;
     enabled = value;
     if (enabled) {
-      // Pi 0.85.1's native shell elapsed-time renderer can start while /fold off.
+      // Pi's native shell elapsed-time renderer can start while /fold off.
       // Its final render is now gated: stop that display timer, never the execution.
       // No generic custom-renderer disposal contract is assumed here.
       for (const child of mode.chatContainer.children) {
@@ -230,9 +244,6 @@ export function installAdapter(version = VERSION) {
       if (enabled && ((mode && this.ui === mode.ui) || hidden.has(this))) { hidden.add(this); return; }
       return original.call(this);
     });
-    patch(ToolExecutionComponent.prototype, 'maybeConvertImagesForKitty', original => function() {
-      if (!enabled || !hidden.has(this)) return original.call(this);
-    });
     patch(proto, 'bindCurrentSessionExtensions', original => function(...args) {
       capture(this);
       return original.apply(this, args);
@@ -258,7 +269,7 @@ export function installAdapter(version = VERSION) {
     });
     patch(proto, 'handleEvent', original => function(event) {
       capture(this);
-      // Pi 0.85.1 handles these display events synchronously once initialized.
+      // Pi handles these display events synchronously once initialized.
       // Preserve ALL native queue/abort/progress/footer/retry/compaction side effects.
       const result = original.call(this, event);
       eventState(event);

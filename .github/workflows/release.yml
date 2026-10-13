@@ -187,7 +187,7 @@ jobs:
             fi
             cat <<EOF
           ## Compatibility
-          - Pi 0.85.1 only. This is a source-only release; no compiled assets or binaries are required.
+          - Pi 1.2.0 or newer (the host in the devDependencies plus a minimum-version floor). This is a source-only release; no compiled assets or binaries are required.
 
           ## Verification
           - Validated commit: \`$COMMIT\`
@@ -200,7 +200,7 @@ jobs:
           EOF
           } > "$NOTES_FILE"
 
-          ARGS=(release create "$TAG" --repo "$GITHUB_REPOSITORY" --verify-tag --title "pi-turn-fold $VERSION (Pi 0.85.1 only)" --notes-file "$NOTES_FILE")
+          ARGS=(release create "$TAG" --repo "$GITHUB_REPOSITORY" --verify-tag --title "pi-turn-fold $VERSION (Pi 1.2.0+)" --notes-file "$NOTES_FILE")
           if [[ -z "$CHANGE_NOTES" ]]; then
             ARGS+=(--generate-notes)
           fi

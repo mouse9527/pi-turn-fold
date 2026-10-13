@@ -102,12 +102,16 @@ with tempfile.TemporaryDirectory(prefix='pi-turn-fold-smoke-') as directory:
             text_row = next(row for row, value in screen.items() if 'SYNTHETIC-MIDDLE-MESSAGE' in value)
             group_row = min(row for row, value in screen.items() if row > text_row and 'Process · Run 150' in value)
             assert group_row == text_row + 2 and screen[text_row + 1] == '', screen
+            # Pi 1.2.0 renders the transcript through a ScrollView. A click has to reach the folded
+            # group header at its real screen row, not the top of the scrolled document, so in
+            # fullscreen the click replaces `/fold 1` and both modes assert the same expansion.
+            os.write(master, f'\x1b[<0;3;{group_row}M\x1b[<0;3;{group_row}m'.encode())
         else:
             emitted = initial.replace('\r', '').split('\n')
             text_row = next(row for row, value in enumerate(emitted) if 'SYNTHETIC-MIDDLE-MESSAGE' in value)
             assert emitted[text_row + 1].strip() == '', emitted[text_row:text_row + 4]
             assert 'Process · Run 150' in emitted[text_row + 2], emitted[text_row:text_row + 4]
-        command('/fold 1')
+            command('/fold 1')
         until('✓ bash echo PRIVATE-LONG-SCRIPT')
         command('/fold 1 300')
         until('SAVED-TOOL-OUTPUT')
@@ -129,7 +133,7 @@ with tempfile.TemporaryDirectory(prefix='pi-turn-fold-smoke-') as directory:
                     break
         process.wait(timeout=3)
         assert process.returncode == 0, process.returncode
-        print('PASS: bundled host identity, segmented restore with native message spacing, two-level command expansion, off/on without reload, reload, quit (300 synthetic calls).')
+        print('PASS: bundled host identity, segmented restore with native message spacing, fullscreen click-through, two-level command expansion, off/on without reload, reload, quit (300 synthetic calls).')
     finally:
         if process.poll() is None:
             process.terminate()

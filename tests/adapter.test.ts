@@ -62,7 +62,9 @@ function host() {
       getEntryRenderer: (name: string) => name === 'test-entry' ? () => new Text('custom-entry-visible', 0, 0)
         : name === 'subagent_supervisor_reply'
           ? (entry: any, options: any) => new Text(`reply-native-${options.expanded ? 'expanded' : 'collapsed'}:${entry.data.message}`, 0, 0)
-          : undefined },
+          : undefined,
+      // No renderer overrides registered, so Pi's own definition wins as it does in a bare session.
+      resolveToolRenderers: (_name: string, base: () => unknown) => base() },
     getToolDefinition: () => definition, getSteeringMessages: () => [], getFollowUpMessages: () => [], retryAttempt: 0,
   };
   const mode = Object.assign(Object.create(InteractiveMode.prototype), {
@@ -70,6 +72,7 @@ function host() {
     ui: { requestRender: () => counters.renders++, terminal: { setProgress: (value: boolean) => progress.push(value) },
       getClearOnShrink: () => false },
     footer: { invalidate: () => counters.footer++ }, chatContainer: new Container(), pendingTools: new Map(),
+    programStatus: { handleEvent: () => {} }, entriesRenderedByBoundaryCompaction: new Set(),
     pendingMessagesContainer: new Container(), statusContainer: new Container(), compactionQueuedMessages: [],
     editor, defaultEditor: editor, options: { tuiMode: 'regular' }, workingVisible: false,
     hideThinkingBlock: false, hiddenThinkingLabel: 'Thinking...', outputPad: 1, toolOutputExpanded: false,
@@ -81,7 +84,7 @@ function host() {
 const patchedMethods: [object, string[]][] = [
   [proto, ['bindCurrentSessionExtensions', 'addMessageToChat', 'renderSessionItems', 'handleEvent', 'addCustomEntryToChat']],
   [AssistantMessageComponent.prototype, ['updateContent']],
-  [ToolExecutionComponent.prototype, ['updateDisplay', 'maybeConvertImagesForKitty']],
+  [ToolExecutionComponent.prototype, ['updateDisplay']],
 ];
 function descriptors(targets = patchedMethods) {
   return targets.flatMap(([target, keys]) => keys.map(key => ({ target, key, value: Object.getOwnPropertyDescriptor(target, key) })));
@@ -92,8 +95,8 @@ function assertRestored(before: ReturnType<typeof descriptors>) {
 }
 
 // Prototype patches are process-global; these top-level tests deliberately run serially.
-test('installed Pi 0.85.1 streams parallel tools with a folded projection and canonical native shell state', async () => {
-  assert.equal(VERSION, '0.85.1');
+test('installed Pi 1.2.0 streams parallel tools with a folded projection and canonical native shell state', async () => {
+  assert.equal(VERSION, '1.2.0');
   assert.match(import.meta.resolve('@earendil-works/pi-coding-agent'), /node_modules\//);
   const { mode, counters, progress } = host();
   const before = descriptors();
@@ -808,7 +811,7 @@ for (const name of ['bash', 'powershell']) test(`${name} closed frames omit argu
     paint(`${phase}: after await`);
   };
   const command = 'COMMAND-MARKER\n' + 'x'.repeat(1_000_000) + '\nCOMMAND-TAIL';
-  const planning = (args: Record<string, unknown>) => assistant([
+  const planning = (args: Record<string, string>) => assistant([
     { type: 'text', text: 'STREAMING-PROSE' },
     { type: 'toolCall', id: 'shell', name, arguments: args },
   ], 'pending');
@@ -848,7 +851,10 @@ for (const name of ['bash', 'powershell']) test(`${name} closed frames omit argu
 
 test('version and duplicate-install guards leave original descriptors intact', () => {
   const before = descriptors();
-  assert.throws(() => installAdapter('0.85.0'), /supports Pi 0.85.1 only/);
+  assert.throws(() => installAdapter('1.1.0'), /requires Pi 1.2.0 or newer/);
+  assertRestored(before);
+  const newer = installAdapter('1.2.1');
+  newer.dispose();
   assertRestored(before);
   const adapter = installAdapter();
   try { assert.throws(() => installAdapter(), /already loaded/); }

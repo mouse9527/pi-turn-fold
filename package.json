@@ -23,8 +23,8 @@
     "@earendil-works/pi-tui": { "optional": true }
   },
   "devDependencies": {
-    "@earendil-works/pi-coding-agent": "0.85.1",
-    "@earendil-works/pi-tui": "0.85.1",
+    "@earendil-works/pi-coding-agent": "1.2.0",
+    "@earendil-works/pi-tui": "1.2.0",
     "@types/node": "22.19.19",
     "typescript": "5.9.3"
   }
