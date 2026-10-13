@@ -39,12 +39,13 @@ RC 缺少真实终端验收时可以公开为明确标记的实验预发布，�
 
 | 环境 | 发布要求 / 证据边界 |
 | --- | --- |
-| Pi **0.85.1**, Node 22.19+ 的 Node 22, Linux CI | check/test/bench + bundled CLI regular/fullscreen PTY 全通过 |
-| Pi **0.85.1**, macOS + Ghostty | 候选 SHA 上人工检查两种模式；记录 macOS、Ghostty、Node 精确版本 |
-| 其他 Pi 版本 | 不支持；version guard 必须拒绝激活，不得部分安装适配器 |
+| Pi **1.2.0**（devDependencies 锁定版本）, Node 22.19+ 的 Node 22, Linux CI | check/test/bench + bundled CLI regular/fullscreen PTY 全通过 |
+| Pi **1.2.0**, macOS + Ghostty | 候选 SHA 上人工检查两种模式；记录 macOS、Ghostty、Node 精确版本 |
+| 低于 **1.2.0** 的 Pi | 不支持；version floor 必须拒绝激活，不得部分安装适配器 |
+| 高于 devDependencies 的 Pi（如 1.2.1） | 允许尝试：包装的私有成员按名字查找，缺失时 `patch()` 报错并整体回滚，不静默降级；发布前仍应在新宿主重跑本节门禁 |
 | Windows、其他 Node major / 终端 | 本轮不增加验证承诺；不能由 Linux CI 推导支持 |
 
-`src/adapter.ts` 依赖私有运行时方法，严格检查 `VERSION === '0.85.1'`。
+`src/adapter.ts` 依赖私有运行时方法，仅对低于 `MIN_SUPPORTED_PI`（当前 `1.2.0`）的宿主硬拒；等于或高于该下限时逐个包装名字查找，缺失即 `patch()`/`capture()` 抛错并 `dispose` 回滚。
 optional peers 的 `*` 是 Pi 核心供给/装载声明，**不是宿主兼容性保证**。
 宿主升级必须复查私有调用、guard、固定 devDependencies/lockfile，并在新宿主重跑单测、两种 PTY 和人工矩阵；不能仅放宽范围。
 不和其他 transcript/tool renderer 叠加；非 TUI 模式不承诺折叠。
@@ -108,7 +109,7 @@ test "$(git rev-parse HEAD)" = "$SHA"
 test -z "$(git status --porcelain)"
 git ls-remote --tags origin "refs/tags/$TAG" "refs/tags/$TAG^{}"
 # 首次创建时远端输出必须为空；同名 tag 已存在则停止，不覆盖。
-git tag -a "$TAG" "$SHA" -m "pi-turn-fold $VERSION; Pi 0.85.1"
+git tag -a "$TAG" "$SHA" -m "pi-turn-fold $VERSION; Pi 1.2.0+"
 git push origin "refs/tags/$TAG"
 test "$(git cat-file -t "$TAG")" = tag
 test "$(git rev-parse "$TAG^{commit}")" = "$SHA"
@@ -173,7 +174,7 @@ Pi 协调 Git ref 时可能 reset + clean checkout，并在存在 package.json �
 ## Changes
 - 用户可见变化（只写本次实际完成项；无先前 tag 时明确首个公开版本）。
 ## Compatibility
-- Pi 0.85.1 only；私有 runtime adapter；其他版本拒绝激活。
+- Pi 1.2.0+；私有 runtime adapter；低于 1.2.0 的宿主拒绝激活，更高版本按名字包装、缺失即报错退出。
 - Node / OS / Ghostty 的实际验证版本；regular/fullscreen；冲突 renderer 说明。
 ## Install / Upgrade / Rollback
 - 无 ref 安装/原生插件更新命令及当前渠道状态；immutable tag 锁版/换版命令；一次 /reload；已验证旧 ref 回滚。

@@ -1,6 +1,6 @@
 # pi-turn-fold
 
-**Experimental segmented tool folding for Pi 0.85.1.** A standalone Pi extension, not a fork. MIT licensed.
+**Experimental segmented tool folding for Pi 1.2.0 or newer.** A standalone Pi extension, not a fork. MIT licensed.
 
 Assistant text streams normally and stays visible. Consecutive tool calls and thinking fold into process groups; **visible text separates the groups**. Tool arguments, results and images stay collapsed while working.
 
@@ -50,7 +50,7 @@ Failures, aborted responses, truncation and unfinished calls are indicated outsi
 
 ## Install from GitHub
 
-Requires **Pi 0.85.1**. Disable conflicting transcript/tool renderers before loading; review the source because extensions run with full system access.
+Requires **Pi 1.2.0 or newer**. Older releases refuse activation; newer ones are attempted and stop activation loudly if a wrapped internal method is gone. Disable conflicting transcript/tool renderers before loading; review the source because extensions run with full system access.
 
 ### Recommended: unpinned GitHub install and native updates
 
@@ -69,7 +69,7 @@ Pi fetches source and loads TypeScript through its extension loader. No manual c
 
 ### Optional: version-locked experimental release or rollback
 
-**[v0.3.0-rc.3](https://github.com/mouse9527/pi-turn-fold/releases/tag/v0.3.0-rc.3) is the current experimental prerelease for Pi 0.85.1 only**, not a stable Latest release. Public status, verification evidence and known limits are authoritative on [GitHub Releases](https://github.com/mouse9527/pi-turn-fold/releases); previous RCs remain available. Install this fixed version directly, without a local build:
+**[v0.3.0-rc.3](https://github.com/mouse9527/pi-turn-fold/releases/tag/v0.3.0-rc.3) is the current experimental prerelease, for Pi 0.85.1 only**, not a stable Latest release. Install the unpinned source above to follow main on Pi 1.2.0; the next RC pins the 1.2.0 host. Public status, verification evidence and known limits are authoritative on [GitHub Releases](https://github.com/mouse9527/pi-turn-fold/releases); previous RCs remain available. Install this fixed version directly, without a local build:
 
 ```bash
 pi install git:github.com/mouse9527/pi-turn-fold@v0.3.0-rc.3
@@ -98,7 +98,7 @@ pi remove git:github.com/mouse9527/pi-turn-fold
 
 ## Try without changing your configuration
 
-**Only Pi 0.85.1 is supported.** Other versions refuse activation. Disable other transcript/tool-display extensions; do not stack this with `pi-cc-extensions`, `pi-tool-display`, or another folding renderer.
+**Pi 1.2.0 or newer is required.** Older versions refuse activation; a newer host is attempted, and a wrapped internal method that disappeared stops activation with an error instead of rendering a broken transcript. Disable other transcript/tool-display extensions; do not stack this with `pi-cc-extensions`, `pi-tool-display`, or another folding renderer.
 
 ```bash
 # After cloning this repository; no npm install is needed to load the extension in Pi.
@@ -145,15 +145,15 @@ Off is a display switch, not an unload: lightweight event/group state keeps trac
 
 Collapsed tools do not invoke native result/diff/image rendering. Collapsed subagent notification groups do not read previews/output paths or construct task details. Pi's lightweight canonical component shells remain so native lifecycle handling is preserved; a separate visible component tree skips them during layout. Tool state and group counts are updated by ID, not by rescanning history. Only the current assistant message is inspected for new text/tool boundaries. Completed text components are reused, not rebuilt when later tools update. Details are created on demand and dropped on collapse. The extension adds no timer.
 
-Local synthetic display microbenchmark (Node 22, Pi 0.85.1):
+Local synthetic display microbenchmark (Node 22, Pi 1.2.0):
 
 | Saved calls | Visible process rows | Update + render p95 |
 | ---: | ---: | ---: |
-| 300 | 1 | ~0.020 ms |
-| 1,000 | 1 | ~0.015 ms |
-| 10,000 | 1 | ~0.015 ms |
-| 10,000 | 100 | ~0.57 ms |
-| 1,000 | 100, with 99 visible text separators | ~0.58 ms |
+| 300 | 1 | ~0.013 ms |
+| 1,000 | 1 | ~0.011 ms |
+| 10,000 | 1 | ~0.010 ms |
+| 10,000 | 100 | ~0.60 ms |
+| 1,000 | 100, with 99 visible text separators | ~0.67 ms |
 
 **These are not input-to-screen latency or total Pi CPU measurements.** They exclude footer statistics, host event/argument parsing, terminal writes and visible image conversion. Many expanded items, long streaming text, or many visible text/group segments can still be expensive. There is no blanket “never lags” claim.
 

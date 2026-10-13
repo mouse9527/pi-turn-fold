@@ -4,7 +4,7 @@
 
 The extension changes presentation only. It registers no tools, modifies no context messages, rewrites no session entries, and edits no installed Pi file. It relies on the ordinary TypeScript extension loader supplying the host's exported classes. Loading a second copy from an absolute `dist/` path would patch the wrong class graph; the real bundled-CLI smoke test covers this distinction.
 
-Runtime compatibility is pinned to Pi **0.85.1**, not a guessed semver range. Only one adapter may be active. Known competing renderer commands are rejected, but this is **not comprehensive conflict detection**. Test with extension discovery disabled.
+Runtime compatibility is pinned to the Pi release in the devDependencies, with a minimum-version floor (**1.2.0**) rather than a guessed semver range or an exact-equality pin. Older hosts are refused; a newer host is attempted, because every wrapped member is looked up by name and `patch()`/`capture()` throw when one is gone. Only one adapter may be active. Known competing renderer commands are rejected, but this is **not comprehensive conflict detection**. Test with extension discovery disabled.
 
 ## Why keep canonical component shells?
 
